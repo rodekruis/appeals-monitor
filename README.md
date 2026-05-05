@@ -1,0 +1,79 @@
+# Appeals Monitor
+
+IFRC Appeal Document Monitor — extracts structured information from IFRC GO appeal documents using LLM agents.
+
+## Description
+
+This pipeline:
+1. Fetches recent appeal documents from the [IFRC GO platform](https://go.ifrc.org/)
+2. Converts PDFs to markdown using Docling
+3. Uses Azure OpenAI agents to extract structured data:
+   - **General info**: appeal code, hazard, country, people affected/targeted, dates, gaps
+   - **Planned interventions**: sector, budget, people targeted, activities
+   - **Cash info**: modality, FSP, digital tools
+
+## Setup
+
+### Prerequisites
+- Python 3.11+
+- [uv](https://docs.astral.sh/uv/) package manager
+- Azure OpenAI access
+- IFRC GO API token
+
+### Local development
+
+1. Copy `.env.example` to `.env` and fill in secrets:
+   ```bash
+   cp .env.example .env
+   ```
+
+2. Install dependencies:
+   ```bash
+   uv sync
+   ```
+
+3. Run the pipeline:
+   ```bash
+   uv run python -m appeals_monitor
+   ```
+
+## Docker
+
+### Build
+```bash
+docker build -t appeals-monitor .
+```
+
+### Run
+```bash
+docker run --env-file .env appeals-monitor
+```
+
+## Azure Logic App Deployment
+
+This container is designed to be triggered by an Azure Logic App using Azure Container Instances (ACI):
+
+1. Push the Docker image to Azure Container Registry (ACR):
+   ```bash
+   az acr login --name <your-acr>
+   docker tag appeals-monitor <your-acr>.azurecr.io/appeals-monitor:latest
+   docker push <your-acr>.azurecr.io/appeals-monitor:latest
+   ```
+
+2. In your Azure Logic App, use the **Create or update container group** action to run the container:
+   - Set the image to `<your-acr>.azurecr.io/appeals-monitor:latest`
+   - Pass environment variables (secrets) via the Logic App action or reference Azure Key Vault
+   - Set restart policy to `Never` (runs once and exits)
+
+3. Optionally add a **Get logs from container** action afterwards to capture the JSON output.
+
+## Environment Variables
+
+| Variable | Description | Required |
+|----------|-------------|----------|
+| `OPENAI_ENDPOINT` | Azure OpenAI endpoint URL | Yes |
+| `OPENAI_API_VERSION` | Azure OpenAI API version | Yes |
+| `AZURE_OPENAI_DEPLOYMENT` | Model deployment name | Yes |
+| `GO_AUTH_TOKEN` | IFRC GO API auth token (base64) | Yes |
+| `LAST_N_DAYS` | Number of days to look back (default: 7) | No |
+| `OUTPUT_PATH` | Path to save JSON output file | No |
