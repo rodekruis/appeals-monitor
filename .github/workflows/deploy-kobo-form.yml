@@ -24,31 +24,46 @@ jobs:
           FORM_FILE="kobo/appeals_monitor_subscription.xlsx"
 
           if [ -z "$KOBO_FORM_UID" ]; then
-            echo "No existing form UID — creating new form..."
+            echo "No existing form UID — creating new form via import..."
             RESPONSE=$(curl -s -w "\n%{http_code}" \
-              -X POST "${KOBO_API_URL}/api/v2/assets/" \
+              -X POST "${KOBO_API_URL}/api/v2/imports/" \
               -H "Authorization: Token ${KOBO_API_TOKEN}" \
               -F "file=@${FORM_FILE}" \
-              -F "asset_type=survey")
+              -F "name=Appeals Monitor Subscription" \
+              -F "assetType=survey")
           else
-            echo "Updating existing form ${KOBO_FORM_UID}..."
+            echo "Replacing form content for ${KOBO_FORM_UID} via import..."
             RESPONSE=$(curl -s -w "\n%{http_code}" \
-              -X PATCH "${KOBO_API_URL}/api/v2/assets/${KOBO_FORM_UID}/" \
+              -X POST "${KOBO_API_URL}/api/v2/imports/" \
               -H "Authorization: Token ${KOBO_API_TOKEN}" \
-              -F "file=@${FORM_FILE}")
+              -F "file=@${FORM_FILE}" \
+              -F "destination=${KOBO_API_URL}/api/v2/assets/${KOBO_FORM_UID}/" \
+              -F "assetType=survey")
           fi
 
           HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
           BODY=$(echo "$RESPONSE" | sed '$d')
 
           if [[ "$HTTP_CODE" -ge 200 && "$HTTP_CODE" -lt 300 ]]; then
-            echo "✅ Form deployed successfully (HTTP $HTTP_CODE)"
-            ASSET_UID=$(echo "$BODY" | python3 -c "import sys,json; print(json.load(sys.stdin).get('uid',''))" 2>/dev/null)
-            if [ -n "$ASSET_UID" ]; then
-              echo "Asset UID: $ASSET_UID"
+            echo "✅ Import submitted successfully (HTTP $HTTP_CODE)"
+            echo "$BODY" | python3 -c "import sys,json; d=json.load(sys.stdin); print(f'Import UID: {d.get(\"uid\",\"\")}  Status: {d.get(\"status\",\"\")}')" 2>/dev/null || true
+            # Wait for import to complete
+            IMPORT_UID=$(echo "$BODY" | python3 -c "import sys,json; print(json.load(sys.stdin).get('uid',''))" 2>/dev/null)
+            if [ -n "$IMPORT_UID" ]; then
+              echo "Waiting for import to process..."
+              sleep 5
+              STATUS=$(curl -s \
+                "${KOBO_API_URL}/api/v2/imports/${IMPORT_UID}/" \
+                -H "Authorization: Token ${KOBO_API_TOKEN}" | \
+                python3 -c "import sys,json; print(json.load(sys.stdin).get('status',''))" 2>/dev/null)
+              echo "Import status: $STATUS"
+              if [ "$STATUS" = "error" ]; then
+                echo "❌ Import failed"
+                exit 1
+              fi
             fi
           else
-            echo "❌ Deployment failed (HTTP $HTTP_CODE)"
+            echo "❌ Import failed (HTTP $HTTP_CODE)"
             echo "$BODY"
             exit 1
           fi
