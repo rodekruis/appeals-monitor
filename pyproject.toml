@@ -3,12 +3,13 @@ name = "appeals-monitor"
 version = "0.1.0"
 description = "IFRC Appeal Document Monitor - extracts structured info from IFRC GO appeal documents using LLM agents"
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.13"
 dependencies = [
     "requests>=2.31.0",
     "openai>=1.0.0",
     "python-dotenv>=1.0.0",
     "docling>=2.0.0",
+    "pypdfium2>=4.0.0",
     "langchain>=0.3.0",
     "langchain-openai>=0.3.0",
     "pydantic>=2.0.0",
@@ -21,3 +22,12 @@ appeals-monitor = "appeals_monitor.__main__:main"
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[dependency-groups]
+dev = [
+    "pytest>=7.0.0",
+    "requests-mock>=1.11.0",
+]

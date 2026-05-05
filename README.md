@@ -71,9 +71,14 @@ This container is designed to be triggered by an Azure Logic App using Azure Con
 
 | Variable | Description | Required |
 |----------|-------------|----------|
+| `OPENAI_API_KEY` | Azure OpenAI API key | Yes |
 | `OPENAI_ENDPOINT` | Azure OpenAI endpoint URL | Yes |
 | `OPENAI_API_VERSION` | Azure OpenAI API version | Yes |
 | `AZURE_OPENAI_DEPLOYMENT` | Model deployment name | Yes |
 | `GO_AUTH_TOKEN` | IFRC GO API auth token (base64) | Yes |
 | `LAST_N_DAYS` | Number of days to look back (default: 7) | No |
-| `OUTPUT_PATH` | Path to save JSON output file | No |
+| `SENDGRID_API_KEY` | SendGrid API key for email notifications | Yes |
+| `EMAIL_FROM` | Verified sender email address | Yes |
+| `KOBO_API_URL` | KoboToolbox API base URL (default: https://kobo.ifrc.org) | No |
+| `KOBO_API_TOKEN` | KoboToolbox API token | Yes |
+| `KOBO_FORM_UID` | Asset UID of the Kobo subscription form | Yes |

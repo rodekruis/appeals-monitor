@@ -13,7 +13,11 @@ from appeals_monitor.monitor import run_monitor
 def main():
     load_dotenv()
 
-    last_n_days = int(os.getenv("LAST_N_DAYS", "7"))
+    try:
+        last_n_days = int(os.getenv("LAST_N_DAYS", "7"))
+    except ValueError:
+        logger.error("LAST_N_DAYS must be a valid integer, defaulting to 7")
+        last_n_days = 7
 
     logger.info(f"Starting Appeals Monitor pipeline (last {last_n_days} days)...")
 
@@ -24,13 +28,6 @@ def main():
         # Output results as JSON (useful for Azure Logic Apps to capture output)
         output = json.dumps(results, indent=2, default=str)
         print(output)
-
-        # Optionally save to file
-        output_path = os.getenv("OUTPUT_PATH")
-        if output_path:
-            with open(output_path, "w", encoding="utf-8") as f:
-                f.write(output)
-            logger.info(f"Results saved to {output_path}")
 
     except Exception as e:
         logger.error(f"Pipeline failed: {e}")
