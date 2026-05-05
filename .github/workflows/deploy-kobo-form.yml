@@ -1,4 +1,4 @@
-name: Deploy KoboToolbox Form
+name: Deploy Kobo Form
 
 on:
   push:
@@ -76,28 +76,28 @@ jobs:
           KOBO_FORM_UID: ${{ secrets.KOBO_FORM_UID }}
         run: |
           if [ -n "$KOBO_FORM_UID" ]; then
-            echo "Publishing form ${KOBO_FORM_UID}..."
-            HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
-              -X POST "${KOBO_API_URL}/api/v2/assets/${KOBO_FORM_UID}/deployment/" \
+            # Get the latest version_id of the asset
+            VERSION_ID=$(curl -s \
+              "${KOBO_API_URL}/api/v2/assets/${KOBO_FORM_UID}/" \
+              -H "Authorization: Token ${KOBO_API_TOKEN}" | \
+              python3 -c "import sys,json; print(json.load(sys.stdin).get('version_id',''))" 2>/dev/null)
+            echo "Latest version_id: $VERSION_ID"
+
+            echo "Redeploying form ${KOBO_FORM_UID}..."
+            RESPONSE=$(curl -s -w "\n%{http_code}" \
+              -X PATCH "${KOBO_API_URL}/api/v2/assets/${KOBO_FORM_UID}/deployment/" \
               -H "Authorization: Token ${KOBO_API_TOKEN}" \
               -H "Content-Type: application/json" \
-              -d '{"active": true}')
+              -d "{\"active\": true, \"version_id\": \"${VERSION_ID}\"}")
+
+            HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
+            BODY=$(echo "$RESPONSE" | sed '$d')
 
             if [[ "$HTTP_CODE" -ge 200 && "$HTTP_CODE" -lt 300 ]]; then
-              echo "✅ Form published successfully"
-            elif [[ "$HTTP_CODE" -eq 405 ]]; then
-              # Already deployed, use PATCH to redeploy
-              HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
-                -X PATCH "${KOBO_API_URL}/api/v2/assets/${KOBO_FORM_UID}/deployment/" \
-                -H "Authorization: Token ${KOBO_API_TOKEN}" \
-                -H "Content-Type: application/json" \
-                -d '{"active": true}')
-              if [[ "$HTTP_CODE" -ge 200 && "$HTTP_CODE" -lt 300 ]]; then
-                echo "✅ Form redeployed successfully"
-              else
-                echo "⚠️ Redeploy returned HTTP $HTTP_CODE (form may need manual publish)"
-              fi
+              echo "✅ Form redeployed successfully"
             else
-              echo "⚠️ Publish returned HTTP $HTTP_CODE (form may need manual publish)"
+              echo "❌ Redeploy failed (HTTP $HTTP_CODE)"
+              echo "$BODY"
+              exit 1
             fi
           fi
