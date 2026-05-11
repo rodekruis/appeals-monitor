@@ -27,6 +27,7 @@ class TestModels:
             appeal_code="MDRKE001",
             hazard="flood",
             country="Kenya",
+            event_description="Heavy rains caused widespread flooding in western Kenya.",
             people_affected=None,
             people_targeted=50000,
             start_date=None,
@@ -53,6 +54,7 @@ class TestModels:
                 appeal_code="MDRKE001",
                 hazard="flood",
                 country="Kenya",
+                event_description="Heavy rains caused widespread flooding.",
                 people_affected=None,
                 people_targeted=50000,
                 gaps_in_response="Lack of shelter",
@@ -123,11 +125,68 @@ class TestFormatSummary:
             }
         ]
         summary = format_summary(results)
-        assert "MDRKE001" in summary
         assert "Kenya" in summary
         assert "Shelter" in summary
+        # No CVA intervention → cash section should be hidden even if cash_info is populated
+        assert "M-Pesa" not in summary
+        assert "1 new Emergency Appeal document" in summary
+
+    def test_cash_section_shown_only_with_cva_intervention(self):
+        """Cash section should only appear when there is a CVA intervention."""
+        base = {
+            "document_url": "http://example.com/appeal.pdf",
+            "general_info": {
+                "appeal_code": "MDRXX001",
+                "hazard": "flood",
+                "country": "TestCountry",
+                "people_affected": 1000,
+                "people_targeted": 500,
+                "start_date": "2026-01-01",
+                "end_date": "2026-06-30",
+                "gaps_in_response": "",
+            },
+            "cash_info": {
+                "modality": "cash transfer",
+                "financial_service_provider": "M-Pesa",
+                "digital_tools": "RedRose",
+            },
+        }
+
+        # With CVA intervention → cash section visible
+        with_cva = {
+            **base,
+            "interventions": {
+                "interventions": [
+                    {
+                        "sector": "Cash and Vouchers Assistance (CVA)",
+                        "budget": 100000,
+                        "people_targeted": 500,
+                        "activities": "Cash grants",
+                    }
+                ]
+            },
+        }
+        summary = format_summary([with_cva])
         assert "M-Pesa" in summary
-        assert "1 document(s) processed" in summary
+        assert "Cash and Voucher Assistance" in summary
+
+        # Without CVA intervention → cash section hidden
+        without_cva = {
+            **base,
+            "interventions": {
+                "interventions": [
+                    {
+                        "sector": "Shelter",
+                        "budget": 200000,
+                        "people_targeted": 1000,
+                        "activities": "Tents",
+                    }
+                ]
+            },
+        }
+        summary = format_summary([without_cva])
+        assert "M-Pesa" not in summary
+        assert "Cash and Voucher Assistance" not in summary
 
     def test_document_with_none_analysis(self):
         """Documents with failed analysis (None values) should not crash."""
@@ -140,7 +199,7 @@ class TestFormatSummary:
             }
         ]
         summary = format_summary(results)
-        assert "1 document(s) processed" in summary
+        assert "1 new Emergency Appeal document" in summary
 
 
 # --- get_recipients_from_kobo tests ---

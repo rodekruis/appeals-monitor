@@ -1,37 +1,44 @@
-Appeals Monitor Summary — {{ results | length }} document(s) processed
+Hi {{ name if name else 'there' }},
 
-============================================================
+We found {{ results | length }} new Emergency Appeal document{{ "s" if results | length != 1 }} matching your interests. Here's a summary of what was published.
 {% for doc in results %}
-------------------------------------------------------------
-Document {{ loop.index }}: {{ doc.general_info.document_url or 'N/A' }}
-------------------------------------------------------------
+{% if results | length > 1 %}
 
-📋 General Information:
-  Appeal Code:     {{ doc.general_info.appeal_code or 'N/A' }}
-  Hazard:          {{ doc.general_info.hazard or 'N/A' }}
-  Country:         {{ doc.general_info.country or 'N/A' }}
-  People Affected: {{ doc.general_info.people_affected or 'N/A' }}
-  People Targeted: {{ doc.general_info.people_targeted or 'N/A' }}
-  Start Date:      {{ doc.general_info.start_date or 'N/A' }}
-  End Date:        {{ doc.general_info.end_date or 'N/A' }}
-  Gaps:            {{ doc.general_info.gaps_in_response or 'N/A' }}
+---
+
+### Document {{ loop.index }} of {{ results | length }}
+{% endif %}
+
+**📋 {{ doc.general_info.country or 'Unknown country' }} - {{ doc.general_info.hazard or 'Unknown hazard' }}**
+
+- **Description:** {{ doc.general_info.event_description or 'N/A' }}
+- **People affected:** {{ "{:,}".format(doc.general_info.people_affected) if doc.general_info.people_affected else 'N/A' }}
+- **People targeted:** {{ "{:,}".format(doc.general_info.people_targeted) if doc.general_info.people_targeted else 'N/A' }}
+- **Operation period:** {{ doc.general_info.start_date or '?' }} to {{ doc.general_info.end_date or '?' }}
+{% if doc.general_info.gaps_in_response %}
+- **Gaps in the response:** {{ doc.general_info.gaps_in_response }}
+{% endif %}
 {% if doc.interventions %}
+- [View document]({{ doc.general_info.document_url }})
 
-🎯 Planned Interventions ({{ doc.interventions | length }}):
+**🎯 Planned Interventions ({{ doc.interventions | length }}):**
+
 {% for intv in doc.interventions %}
-  {{ loop.index }}. {{ intv.sector or 'N/A' }}
-     Budget: {{ intv.budget or 'N/A' }} CHF
-     People targeted: {{ intv.people_targeted or 'N/A' }}
-     Activities: {{ intv.activities or 'N/A' }}
+{{ loop.index }}. **{{ intv.sector or 'N/A' }}** - Budget: {{ "{:,}".format(intv.budget) if intv.budget else 'N/A' }} CHF, People targeted: {{ "{:,}".format(intv.people_targeted) if intv.people_targeted else 'N/A' }}, Activities:
+{{ intv.activities or '' }}
 {% endfor %}
 {% endif %}
 {% if doc.cash_info.has_info %}
 
-💰 Cash Information:
-  Modality: {{ doc.cash_info.modality or 'N/A' }}
-  FSP:      {{ doc.cash_info.financial_service_provider or 'N/A' }}
-  Digital:  {{ doc.cash_info.digital_tools or 'N/A' }}
+**💰 Cash and Voucher Assistance:**
+
+- **Modality:** {{ doc.cash_info.modality or 'N/A' }}
+- **Financial service provider:** {{ doc.cash_info.financial_service_provider or 'N/A' }}
+- **Digital tools:** {{ doc.cash_info.digital_tools or 'N/A' }}
 {% endif %}
 {% endfor %}
-============================================================
-End of summary.
+
+---
+
+*This email was generated automatically by the Appeals Monitor. \\
+[Update your preferences or unsubscribe](https://ee.ifrc.org/x/zBtCj5FW) or [report a bug](https://github.com/rodekruis/appeals-monitor/issues/new?template=bug_report.md)*.

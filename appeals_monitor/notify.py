@@ -4,6 +4,7 @@ import os
 from pathlib import Path
 from typing import List
 
+import markdown
 import requests
 from jinja2 import Environment, FileSystemLoader
 from sendgrid import SendGridAPIClient
@@ -35,7 +36,12 @@ def _prepare_template_context(results: List[dict]) -> List[dict]:
         ) or []
 
         cash = doc.get("cash_info") or {}
-        cash["has_info"] = any(
+        has_cva_intervention = any(
+            "cash" in (intv.get("sector") or "").lower()
+            or "cva" in (intv.get("sector") or "").lower()
+            for intv in interventions
+        )
+        cash["has_info"] = has_cva_intervention and any(
             cash.get(k)
             for k in ("modality", "financial_service_provider", "digital_tools")
         )
@@ -50,7 +56,7 @@ def _prepare_template_context(results: List[dict]) -> List[dict]:
     return docs
 
 
-def format_summary(results: List[dict]) -> str:
+def format_summary(results: List[dict], recipient_name: str = "") -> str:
     """Formats extracted appeal data into a human-readable summary.
 
     The layout is defined in ``templates/email_summary.md`` (Jinja2).
@@ -59,7 +65,10 @@ def format_summary(results: List[dict]) -> str:
         return "No new appeal documents were found in the monitoring period."
 
     template = _jinja_env.get_template("email_summary.md")
-    return template.render(results=_prepare_template_context(results))
+    return template.render(
+        results=_prepare_template_context(results),
+        name=recipient_name,
+    )
 
 
 def _filter_results_by_sectors(results: List[dict], sector_labels: set) -> List[dict]:
@@ -84,7 +93,12 @@ def _filter_results_by_sectors(results: List[dict], sector_labels: set) -> List[
     return filtered
 
 
-def send_email(results: List[dict], recipient_email: str, subject: str) -> None:
+def send_email(
+    results: List[dict],
+    recipient_email: str,
+    subject: str,
+    recipient_name: str = "",
+) -> None:
     """Sends a human-readable email summary to a single recipient using SendGrid.
 
     Requires the following environment variables:
@@ -99,13 +113,15 @@ def send_email(results: List[dict], recipient_email: str, subject: str) -> None:
             "SendGrid not configured: missing SENDGRID_API_KEY and/or EMAIL_FROM."
         )
 
-    body = format_summary(results)
+    body = format_summary(results, recipient_name=recipient_name)
+    html_body = markdown.markdown(body)
 
     message = Mail(
-        from_email=email_from,
+        from_email=(email_from, "Appeals Monitor"),
         to_emails=recipient_email,
         subject=subject,
         plain_text_content=body,
+        html_content=html_body,
     )
 
     sg = SendGridAPIClient(api_key)
@@ -176,7 +192,8 @@ def get_recipients_from_kobo() -> List[dict]:
                     sector = KOBO_CHOICE_TO_SECTOR.get(choice)
                     if sector:
                         sector_labels.add(sector.value)
-            recipients.append({"email": email, "sectors": sector_labels})
+            name = (s.get("name") or "").strip()
+            recipients.append({"email": email, "name": name, "sectors": sector_labels})
 
         logger.info(
             f"Fetched {len(recipients)} active recipient(s) from Kobo form {form_uid}."
@@ -212,9 +229,14 @@ def notify(results: List[dict]) -> None:
                 f"(sectors: {recipient['sectors'] or 'all'}), skipping."
             )
             continue
-        subject = f"Appeals Monitor: {len(filtered)} document(s) matching your sectors"
+        subject = f"{len(filtered)} new appeals matching your preferences"
         try:
-            send_email(filtered, recipient["email"], subject)
+            send_email(
+                filtered,
+                recipient["email"],
+                subject,
+                recipient_name=recipient.get("name", ""),
+            )
         except Exception as e:
             errors.append(f"{recipient['email']}: {e}")
             logger.error(f"Failed to send email to {recipient['email']}: {e}")

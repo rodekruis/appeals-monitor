@@ -93,6 +93,7 @@ class ResponseInfo(BaseModel):
     appeal_code: str
     hazard: str
     country: str
+    event_description: str
     people_affected: Union[int, None]
     people_targeted: Union[int, None]
     start_date: Union[date, None] = None
