@@ -95,10 +95,9 @@ def send_email(results: List[dict], recipient_email: str, subject: str) -> None:
     email_from = os.getenv("EMAIL_FROM")
 
     if not api_key or not email_from:
-        logger.warning(
-            "SendGrid not configured (missing SENDGRID_API_KEY/EMAIL_FROM), skipping notification."
+        raise RuntimeError(
+            "SendGrid not configured: missing SENDGRID_API_KEY and/or EMAIL_FROM."
         )
-        return
 
     body = format_summary(results)
 
@@ -109,12 +108,9 @@ def send_email(results: List[dict], recipient_email: str, subject: str) -> None:
         plain_text_content=body,
     )
 
-    try:
-        sg = SendGridAPIClient(api_key)
-        response = sg.send(message)
-        logger.info(f"Email sent to {recipient_email}. Status: {response.status_code}")
-    except Exception as e:
-        logger.error(f"Failed to send email to {recipient_email}: {e}")
+    sg = SendGridAPIClient(api_key)
+    response = sg.send(message)
+    logger.info(f"Email sent to {recipient_email}. Status: {response.status_code}")
 
 
 def get_recipients_from_kobo() -> List[dict]:
@@ -187,8 +183,7 @@ def get_recipients_from_kobo() -> List[dict]:
         )
         return recipients
     except Exception as e:
-        logger.error(f"Failed to fetch recipients from Kobo: {e}")
-        return []
+        raise RuntimeError(f"Failed to fetch recipients from Kobo: {e}") from e
 
 
 def notify(results: List[dict]) -> None:
@@ -196,6 +191,8 @@ def notify(results: List[dict]) -> None:
 
     Fetches recipients from KoboToolbox, filters results per recipient
     based on their sector preferences, and sends personalized emails.
+
+    Raises on any failure (Kobo fetch, email send) so the pipeline can handle it.
     """
     if not results:
         logger.info("No results to notify about.")
@@ -206,6 +203,7 @@ def notify(results: List[dict]) -> None:
         logger.warning("No recipients found, skipping notification.")
         return
 
+    errors = []
     for recipient in recipients:
         filtered = _filter_results_by_sectors(results, recipient["sectors"])
         if not filtered:
@@ -215,4 +213,13 @@ def notify(results: List[dict]) -> None:
             )
             continue
         subject = f"Appeals Monitor: {len(filtered)} document(s) matching your sectors"
-        send_email(filtered, recipient["email"], subject)
+        try:
+            send_email(filtered, recipient["email"], subject)
+        except Exception as e:
+            errors.append(f"{recipient['email']}: {e}")
+            logger.error(f"Failed to send email to {recipient['email']}: {e}")
+
+    if errors:
+        raise RuntimeError(
+            f"Failed to send {len(errors)} notification(s):\n" + "\n".join(errors)
+        )

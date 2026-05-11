@@ -15,6 +15,14 @@ from docling.document_converter import (
 from docling.datamodel.pipeline_options import PdfPipelineOptions, OcrAutoOptions
 
 from appeals_monitor.logger import logger
+from appeals_monitor.storage import upload_document, document_exists
+
+# Only fetch these document types (server-side filtering not supported)
+ALLOWED_DOCUMENT_TYPES = {
+    "DREF Operation",
+    "Operational strategy",
+    "Emergency Appeal",
+}
 
 # Per-page timeout in seconds (CPU-based processing)
 _TIMEOUT_PER_PAGE = 30.0
@@ -82,10 +90,10 @@ def _download_document(document_url: str) -> str:
         return tmp.name
 
 
-def get_documents(last_n_days: int = 7) -> List[tuple[str, str]]:
+def get_documents(last_n_days: int = 7) -> List[tuple[str, str, str]]:
     """Fetches and downloads appeal documents created in the last n days from the IFRC GO platform.
 
-    Returns a list of (document_url, local_pdf_path) tuples.
+    Returns a list of (document_url, local_pdf_path, document_type) tuples.
     Documents that fail to download are skipped.
     """
     to_date = datetime.now().strftime("%Y-%m-%d")
@@ -105,13 +113,22 @@ def get_documents(last_n_days: int = 7) -> List[tuple[str, str]]:
         logger.error(f"Error fetching documents: {e}")
         return []
 
-    document_urls = [d.get("document_url") for d in data.get("results", [])]
+    all_docs = data.get("results", [])
+    filtered = [d for d in all_docs if d.get("type") in ALLOWED_DOCUMENT_TYPES]
+    skipped = len(all_docs) - len(filtered)
+    if skipped:
+        logger.info(f"Filtered out {skipped} documents with non-matching types")
 
     results = []
-    for doc_url in document_urls:
+    for doc in filtered:
+        doc_url = doc.get("document_url")
+        doc_type = doc.get("type", "")
+        if document_exists(doc_url, doc_type):
+            logger.info(f"Already in blob storage, skipping: {doc_url}")
+            continue
         pdf_path = _download_document(doc_url)
         if pdf_path:
-            results.append((doc_url, pdf_path))
+            results.append((doc_url, pdf_path, doc_type))
     return results
 
 
@@ -205,3 +222,30 @@ def convert_document(pdf_path: str) -> str:
             os.unlink(pdf_path)
         except OSError:
             pass
+
+
+def run_etl(last_n_days: int = 7) -> int:
+    """ETL pipeline: fetch documents, convert to markdown, upload to blob storage.
+
+    Returns the number of documents successfully processed.
+    """
+    logger.info(f"Fetching documents from the last {last_n_days} days...")
+    docs = get_documents(last_n_days=last_n_days)
+    logger.info(f"Found {len(docs)} documents")
+
+    uploaded = 0
+    for doc_url, pdf_path, doc_type in docs:
+        logger.info(f"Converting: {doc_url} (type={doc_type})")
+        markdown = convert_document(pdf_path)
+        if not markdown:
+            logger.warning(f"Skipping empty document: {doc_url}")
+            continue
+
+        try:
+            upload_document(doc_url, markdown, doc_type)
+            uploaded += 1
+        except Exception as e:
+            logger.error(f"Failed to upload {doc_url} to blob storage: {e}")
+
+    logger.info(f"ETL complete: {uploaded}/{len(docs)} documents uploaded.")
+    return uploaded

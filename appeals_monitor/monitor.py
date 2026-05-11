@@ -1,4 +1,4 @@
-"""Orchestrator: ties together ETL and analysis to run the full monitoring pipeline."""
+"""Orchestrator: analysis + notification pipeline (reads parsed documents from blob storage)."""
 
 from typing import List
 import os
@@ -6,15 +6,16 @@ import os
 from langchain_openai import AzureChatOpenAI
 
 from appeals_monitor.logger import logger
-from appeals_monitor.etl import get_documents, convert_document
 from appeals_monitor.analysis import create_agent_pipeline, analyze_document
 from appeals_monitor.notify import notify
+from appeals_monitor.storage import list_unprocessed, mark_processed
 
 
-def run_monitor(last_n_days: int = 7) -> List[dict]:
-    """Main monitoring function: fetches, converts, and analyzes appeal documents.
+def run_analysis() -> List[dict]:
+    """Reads parsed documents from blob storage, runs LLM analysis, and sends notifications.
 
-    Returns a list of results per document with general info, interventions, and cash info.
+    Only processes documents that haven't been analyzed yet (no 'processed_at' timestamp).
+    Returns a list of analysis results.
     """
     # Validate required configuration
     endpoint = os.getenv("OPENAI_ENDPOINT")
@@ -33,27 +34,25 @@ def run_monitor(last_n_days: int = 7) -> List[dict]:
     # Create agent once and reuse across all documents
     agent = create_agent_pipeline(model)
 
-    # Fetch and download documents
-    logger.info(f"Fetching documents from the last {last_n_days} days...")
-    docs = get_documents(last_n_days=last_n_days)
-    logger.info(f"Found {len(docs)} documents")
-
     results = []
+    for doc in list_unprocessed():
+        doc_url = doc["document_url"]
+        markdown = doc["markdown"]
+        blob_name = doc["blob_name"]
 
-    for doc_url, pdf_path in docs:
-        logger.info(f"Processing: {doc_url}")
-        markdown = convert_document(pdf_path)
-        if not markdown:
-            logger.warning(f"Skipping empty document: {doc_url}")
-            continue
-
+        logger.info(f"Analyzing: {doc_url}")
         doc_result = analyze_document(markdown, doc_url, agent)
         results.append(doc_result)
 
-    # Send email notification (non-critical: don't crash pipeline on failure)
-    try:
+        try:
+            mark_processed(blob_name, doc_result)
+        except Exception as e:
+            logger.error(f"Failed to mark {blob_name} as processed: {e}")
+
+    # Send notifications
+    if results:
         notify(results)
-    except Exception as e:
-        logger.error(f"Notification failed (results still returned): {e}")
+    else:
+        logger.info("No new documents to analyze.")
 
     return results

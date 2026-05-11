@@ -4,20 +4,30 @@ IFRC Appeal Document Monitor — extracts structured information from IFRC GO ap
 
 ## Description
 
-This pipeline:
-1. Fetches recent appeal documents from the [IFRC GO platform](https://go.ifrc.org/)
-2. Converts PDFs to markdown using Docling
-3. Uses Azure OpenAI agents to extract structured data:
+This pipeline has two independent stages connected via Azure Blob Storage:
+
+### 1. ETL (`etl`)
+- Fetches recent appeal documents from the [IFRC GO platform](https://go.ifrc.org/)
+- Converts PDFs to markdown using Docling
+- Uploads parsed documents to Azure Blob Storage
+- Skips documents already in blob storage
+
+### 2. Analysis + Notification (`analyze`)
+- Reads unprocessed documents from Azure Blob Storage
+- Uses Azure OpenAI to extract structured data:
    - **General info**: appeal code, hazard, country, people affected/targeted, dates, gaps
    - **Planned interventions**: sector, budget, people targeted, activities
    - **Cash info**: modality, FSP, digital tools
+- Sends personalized email notifications based on sector preferences (via KoboToolbox)
+- Marks documents as processed so they aren't re-analyzed
 
 ## Setup
 
 ### Prerequisites
-- Python 3.11+
+- Python 3.13+
 - [uv](https://docs.astral.sh/uv/) package manager
 - Azure OpenAI access
+- Azure Storage account
 - IFRC GO API token
 
 ### Local development
@@ -32,9 +42,18 @@ This pipeline:
    uv sync
    ```
 
-3. Run the pipeline:
+3. Run the full pipeline (ETL + analysis):
    ```bash
    uv run python -m appeals_monitor
+   ```
+
+   Or run each stage independently:
+   ```bash
+   # Fetch, convert, and upload documents only
+   uv run python -m appeals_monitor etl
+
+   # Analyze and send notifications only
+   uv run python -m appeals_monitor analyze
    ```
 
 ## Docker
@@ -76,6 +95,7 @@ This container is designed to be triggered by an Azure Logic App using Azure Con
 | `OPENAI_API_VERSION` | Azure OpenAI API version | Yes |
 | `AZURE_OPENAI_DEPLOYMENT` | Model deployment name | Yes |
 | `GO_AUTH_TOKEN` | IFRC GO API auth token (base64) | Yes |
+| `AZURE_STORAGE_CONNECTION_STRING` | Azure Blob Storage connection string | Yes |
 | `LAST_N_DAYS` | Number of days to look back (default: 7) | No |
 | `SENDGRID_API_KEY` | SendGrid API key for email notifications | Yes |
 | `EMAIL_FROM` | Verified sender email address | Yes |
