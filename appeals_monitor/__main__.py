@@ -7,10 +7,12 @@ import sys
 from dotenv import load_dotenv
 
 from appeals_monitor.logger import logger
+from appeals_monitor.secrets import load_secrets_from_key_vault
 
 
 def main():
     load_dotenv()
+    load_secrets_from_key_vault()
 
     command = sys.argv[1] if len(sys.argv) > 1 else "all"
 
