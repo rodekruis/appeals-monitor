@@ -7,7 +7,7 @@ from langchain_openai import AzureChatOpenAI
 
 from appeals_monitor.logger import logger
 from appeals_monitor.etl import get_documents, convert_document
-from appeals_monitor.analysis import create_agents, analyze_document
+from appeals_monitor.analysis import create_agent_pipeline, analyze_document
 from appeals_monitor.notify import notify
 
 
@@ -30,24 +30,24 @@ def run_monitor(last_n_days: int = 7) -> List[dict]:
         openai_api_version=api_version,
     )
 
-    # Create agents once and reuse across all documents
-    agents = create_agents(model)
+    # Create agent once and reuse across all documents
+    agent = create_agent_pipeline(model)
 
-    # Fetch and convert documents
+    # Fetch and download documents
     logger.info(f"Fetching documents from the last {last_n_days} days...")
     docs = get_documents(last_n_days=last_n_days)
     logger.info(f"Found {len(docs)} documents")
 
     results = []
 
-    for doc_url in docs:
+    for doc_url, pdf_path in docs:
         logger.info(f"Processing: {doc_url}")
-        markdown = convert_document(doc_url)
+        markdown = convert_document(pdf_path)
         if not markdown:
             logger.warning(f"Skipping empty document: {doc_url}")
             continue
 
-        doc_result = analyze_document(markdown, doc_url, agents)
+        doc_result = analyze_document(markdown, doc_url, agent)
         results.append(doc_result)
 
     # Send email notification (non-critical: don't crash pipeline on failure)

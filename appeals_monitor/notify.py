@@ -1,73 +1,65 @@
 """Notification functions: send human-readable email summaries of extracted appeal data."""
 
 import os
+from pathlib import Path
 from typing import List
 
 import requests
+from jinja2 import Environment, FileSystemLoader
 from sendgrid import SendGridAPIClient
 from sendgrid.helpers.mail import Mail
 
 from appeals_monitor.logger import logger
 from appeals_monitor.analysis import KOBO_CHOICE_TO_SECTOR
 
+_TEMPLATE_DIR = Path(__file__).parent / "templates"
+_jinja_env = Environment(
+    loader=FileSystemLoader(_TEMPLATE_DIR),
+    trim_blocks=True,
+    lstrip_blocks=True,
+    keep_trailing_newline=True,
+)
 
-def format_summary(results: List[dict]) -> str:
-    """Formats extracted appeal data into a human-readable summary."""
-    if not results:
-        return "No new appeal documents were found in the monitoring period."
 
-    lines = [f"Appeals Monitor Summary — {len(results)} document(s) processed\n"]
-    lines.append("=" * 60)
-
-    for i, doc in enumerate(results, 1):
-        lines.append(f"\n{'—' * 60}")
-        lines.append(f"Document {i}: {doc.get('document_url', 'N/A')}")
-        lines.append(f"{'—' * 60}")
-
-        # General info
+def _prepare_template_context(results: List[dict]) -> List[dict]:
+    """Normalise raw pipeline results into a flat structure the template can iterate over."""
+    docs = []
+    for doc in results:
         info = doc.get("general_info") or {}
-        lines.append("\n📋 General Information:")
-        lines.append(f"  Appeal Code:     {info.get('appeal_code', 'N/A')}")
-        lines.append(f"  Hazard:          {info.get('hazard', 'N/A')}")
-        lines.append(f"  Country:         {info.get('country', 'N/A')}")
-        lines.append(f"  People Affected: {info.get('people_affected', 'N/A')}")
-        lines.append(f"  People Targeted: {info.get('people_targeted', 'N/A')}")
-        lines.append(f"  Start Date:      {info.get('start_date', 'N/A')}")
-        lines.append(f"  End Date:        {info.get('end_date', 'N/A')}")
-        lines.append(f"  Gaps:            {info.get('gaps_in_response', 'N/A')}")
 
-        # Interventions
         interventions_data = doc.get("interventions") or {}
         interventions = (
             interventions_data.get("interventions")
             if isinstance(interventions_data, dict)
             else []
-        )
-        interventions = interventions or []
-        if interventions:
-            lines.append(f"\n🎯 Planned Interventions ({len(interventions)}):")
-            for j, intv in enumerate(interventions, 1):
-                lines.append(f"  {j}. {intv.get('sector', 'N/A')}")
-                lines.append(f"     Budget: {intv.get('budget', 'N/A')} CHF")
-                lines.append(
-                    f"     People targeted: {intv.get('people_targeted', 'N/A')}"
-                )
-                lines.append(f"     Activities: {intv.get('activities', 'N/A')}")
+        ) or []
 
-        # Cash info
         cash = doc.get("cash_info") or {}
-        if any(
+        cash["has_info"] = any(
             cash.get(k)
             for k in ("modality", "financial_service_provider", "digital_tools")
-        ):
-            lines.append("\n💰 Cash Information:")
-            lines.append(f"  Modality: {cash.get('modality', 'N/A')}")
-            lines.append(f"  FSP:      {cash.get('financial_service_provider', 'N/A')}")
-            lines.append(f"  Digital:  {cash.get('digital_tools', 'N/A')}")
+        )
 
-    lines.append(f"\n{'=' * 60}")
-    lines.append("End of summary.")
-    return "\n".join(lines)
+        docs.append(
+            {
+                "general_info": {**{"document_url": doc.get("document_url")}, **info},
+                "interventions": interventions,
+                "cash_info": cash,
+            }
+        )
+    return docs
+
+
+def format_summary(results: List[dict]) -> str:
+    """Formats extracted appeal data into a human-readable summary.
+
+    The layout is defined in ``templates/email_summary.md`` (Jinja2).
+    """
+    if not results:
+        return "No new appeal documents were found in the monitoring period."
+
+    template = _jinja_env.get_template("email_summary.md")
+    return template.render(results=_prepare_template_context(results))
 
 
 def _filter_results_by_sectors(results: List[dict], sector_labels: set) -> List[dict]:

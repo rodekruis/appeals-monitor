@@ -1,9 +1,11 @@
 """Document analysis functions: LLM-based extraction of structured data from appeal documents."""
 
 from enum import Enum
+from pathlib import Path
 from typing import List, Union
 from datetime import date, datetime
 
+from jinja2 import Environment, FileSystemLoader
 from langchain.agents import create_agent
 from langchain_openai import AzureChatOpenAI
 from pydantic import BaseModel, Field, field_validator
@@ -16,12 +18,11 @@ from appeals_monitor.logger import logger
 class Sector(str, Enum):
     """IFRC Surge Catalogue sectors."""
 
-    ADMINISTRATION = "Administration"
     CVA = "Cash and Vouchers Assistance (CVA)"
     COMMUNICATIONS = "Communications"
     CEA = "Community Engagement and Accountability (CEA)"
     DIGITAL_SYSTEMS = "Digital Systems, Tools & Information Technology"
-    EMERGENCY_NEEDS_ASSESSMENT = "Emergency Needs Assessment"
+    GREEN_RESPONSE = "Green Response (GR)"
     HEALTH = "Health"
     HUMANITARIAN_DIPLOMACY = "Humanitarian Diplomacy"
     INFORMATION_MANAGEMENT = "Information Management (IM)"
@@ -32,21 +33,19 @@ class Sector(str, Enum):
     PMER = "Planning, Monitoring, Evaluation and Reporting (PMER)"
     PGI = "Protection, Gender, and Inclusion (PGI)"
     RELIEF = "Relief"
-    RISK_MANAGEMENT = "Risk Management"
     SECURITY = "Security"
     SHELTER = "Shelter"
-    STRATEGIC_PARTNERSHIPS = "Strategic Partnerships and Resource Mobilisation"
+    STRATEGIC_PARTNERSHIPS = "Strategic Partnerships and Resource Mobilisation (SPRM)"
     WASH = "Water, Sanitation and Hygiene (WASH)"
 
 
 # Mapping from Kobo choice names to Sector enum values
 KOBO_CHOICE_TO_SECTOR = {
-    "administration": Sector.ADMINISTRATION,
     "cva": Sector.CVA,
     "communications": Sector.COMMUNICATIONS,
     "cea": Sector.CEA,
     "digital_systems": Sector.DIGITAL_SYSTEMS,
-    "emergency_needs_assessment": Sector.EMERGENCY_NEEDS_ASSESSMENT,
+    "green_response": Sector.GREEN_RESPONSE,
     "health": Sector.HEALTH,
     "humanitarian_diplomacy": Sector.HUMANITARIAN_DIPLOMACY,
     "information_management": Sector.INFORMATION_MANAGEMENT,
@@ -57,7 +56,6 @@ KOBO_CHOICE_TO_SECTOR = {
     "pmer": Sector.PMER,
     "pgi": Sector.PGI,
     "relief": Sector.RELIEF,
-    "risk_management": Sector.RISK_MANAGEMENT,
     "security": Sector.SECURITY,
     "shelter": Sector.SHELTER,
     "strategic_partnerships": Sector.STRATEGIC_PARTNERSHIPS,
@@ -115,84 +113,43 @@ class PlannedIntervention(BaseModel):
     activities: str
 
 
-class PlannedInterventionList(BaseModel):
-    interventions: List[PlannedIntervention] = Field(None, title="Interventions")
-
-
 class CashInfo(BaseModel):
     modality: str
     financial_service_provider: str
     digital_tools: str
 
 
-# --- Prompt templates ---
+class AppealExtraction(BaseModel):
+    """Combined extraction result for all sections of an appeal document."""
 
-PROMPT_GENERAL_INFO = """Read this document and extract information in a structured format. The information is usually
-at the beginning of the document, in tabular format. If it's not there, look for it in the rest of the document.
-Do not make up information, if you can't find it in the document, just leave the field empty or with a value of None. The information to extract is:
-    - Appeal code: The unique code of the appeal, usually in format "MDRXXYY"
-    - Hazard: The type of hazard (e.g. flood, earthquake, etc.)
-    - Country: The country or countries affected by the disaster
-    - People affected: The total number of people affected by the disaster
-    - People targeted: The total number of people targeted with assistance in the appeal
-    - Start date: The start date of the operation (in YYYY-MM-DD format)
-    - End date: The end date of the operation (in YYYY-MM-DD format)
-    - Gaps in response: A brief description of the gaps in the humanitarian response that the appeal aims to address
+    general_info: ResponseInfo
+    interventions: List[PlannedIntervention] = Field(default_factory=list)
+    cash_info: CashInfo
 
-Document:
-{document}"""
 
-PROMPT_INTERVENTIONS = """Read this document and extract information in a structured format. The information on interventions is usually towards the end of the document, divided by sector. If it's not there, look for it in the rest of the document.
-Do not make up information, if you can't find it in the document, just leave the field empty or with a value of None. The information to extract is a list of interventions, with the following fields:
-    - Sector: The sector of the intervention. You MUST match the sector name to the closest one from this list:
-        * Administration
-        * Cash and Vouchers Assistance (CVA)
-        * Communications
-        * Community Engagement and Accountability (CEA)
-        * Digital Systems, Tools & Information Technology
-        * Emergency Needs Assessment
-        * Health
-        * Humanitarian Diplomacy
-        * Information Management (IM)
-        * Livelihoods and Basic Needs
-        * Logistics
-        * Migration
-        * Operations Management
-        * Planning, Monitoring, Evaluation and Reporting (PMER)
-        * Protection, Gender, and Inclusion (PGI)
-        * Relief
-        * Risk Management
-        * Security
-        * Shelter
-        * Strategic Partnerships and Resource Mobilisation
-        * Water, Sanitation and Hygiene (WASH)
-      Use the closest matching sector from this list. Only discard an intervention if its sector clearly does not fit any of the above.
-    - Budget: The budget allocated for the intervention in CHF
-    - People targeted: The number of people targeted with the intervention
-    - Activities: A brief description of the activities planned in the intervention
+# --- Prompt template ---
 
-Document:
-{document}"""
+_PROMPTS_DIR = Path(__file__).parent / "prompts"
+_jinja_env = Environment(
+    loader=FileSystemLoader(_PROMPTS_DIR),
+    keep_trailing_newline=True,
+)
+_EXTRACTION_TEMPLATE = _jinja_env.get_template("analysis.md")
 
-PROMPT_CASH_INFO = """Read this document and determine if a cash intervention is planned in the appeal. If yes, extract the following information:
-    - Modality: The modality of the cash intervention (e.g. cash transfer, voucher, etc.)
-    - Financial service provider: The financial service provider (FSP) that can or will be used for the cash intervention
-    - Digital tools: The digital tools that can or will be used for the cash intervention (e.g. mobile money, RedRose, etc.)
-Do not make up information, if you can't find it in the document, just leave the field empty.
+# Build the sector bullet list dynamically from the enum so it stays in sync
+_SECTOR_LIST = "\n".join(f"        * {s.value}" for s in Sector)
 
-Document:
-{document}"""
+
+def _render_prompt(document: str) -> str:
+    return _EXTRACTION_TEMPLATE.render(document=document, sector_list=_SECTOR_LIST)
 
 
 # --- Agent factory ---
 
 
-def create_agents(model: AzureChatOpenAI) -> tuple:
-    """Creates and returns the three extraction agents. Call once and reuse across documents."""
-    agent_general_info = create_agent(model, response_format=ResponseInfo)
-    agent_interventions = create_agent(model, response_format=PlannedInterventionList)
-    agent_cash = create_agent(model, response_format=CashInfo)
-    return agent_general_info, agent_interventions, agent_cash
+def create_agent_pipeline(model: AzureChatOpenAI):
+    """Creates and returns the extraction agent. Call once and reuse across documents."""
+    return create_agent(model, response_format=AppealExtraction)
 
 
 # --- Document analysis ---
@@ -201,76 +158,43 @@ def create_agents(model: AzureChatOpenAI) -> tuple:
 def analyze_document(
     markdown: str,
     doc_url: str,
-    agents: tuple,
+    agent,
 ) -> dict:
-    """Analyzes a markdown document using LLM agents to extract structured information.
+    """Analyzes a markdown document using an LLM agent to extract structured information.
 
     Args:
         markdown: The document content in markdown format.
         doc_url: The source URL of the document.
-        agents: Tuple of (agent_general_info, agent_interventions, agent_cash).
+        agent: The extraction agent (from create_agent_pipeline).
 
     Returns a dict with general_info, interventions, and cash_info.
     """
-    agent_general_info, agent_interventions, agent_cash = agents
     doc_result = {"document_url": doc_url}
 
-    # Extract general info
     try:
-        result = agent_general_info.invoke(
+        result = agent.invoke(
             {
                 "messages": [
                     {
                         "role": "user",
-                        "content": PROMPT_GENERAL_INFO.format(document=markdown),
+                        "content": _render_prompt(markdown),
                     }
                 ]
             }
         )
-        doc_result["general_info"] = result["structured_response"].model_dump(
-            mode="json"
-        )
-        logger.info(f"General info: {doc_result['general_info']}")
+        extraction: AppealExtraction = result["structured_response"]
+        doc_result["general_info"] = extraction.general_info.model_dump(mode="json")
+        doc_result["interventions"] = {
+            "interventions": [
+                i.model_dump(mode="json") for i in extraction.interventions
+            ]
+        }
+        doc_result["cash_info"] = extraction.cash_info.model_dump(mode="json")
+        logger.info(f"Extracted: {doc_result['general_info']}")
     except Exception as e:
-        logger.error(f"Failed to extract general info from {doc_url}: {e}")
+        logger.error(f"Failed to extract data from {doc_url}: {e}")
         doc_result["general_info"] = None
-
-    # Extract interventions
-    try:
-        result = agent_interventions.invoke(
-            {
-                "messages": [
-                    {
-                        "role": "user",
-                        "content": PROMPT_INTERVENTIONS.format(document=markdown),
-                    }
-                ]
-            }
-        )
-        doc_result["interventions"] = result["structured_response"].model_dump(
-            mode="json"
-        )
-        logger.info(f"Interventions: {doc_result['interventions']}")
-    except Exception as e:
-        logger.error(f"Failed to extract interventions from {doc_url}: {e}")
         doc_result["interventions"] = None
-
-    # Extract cash info
-    try:
-        result = agent_cash.invoke(
-            {
-                "messages": [
-                    {
-                        "role": "user",
-                        "content": PROMPT_CASH_INFO.format(document=markdown),
-                    }
-                ]
-            }
-        )
-        doc_result["cash_info"] = result["structured_response"].model_dump(mode="json")
-        logger.info(f"Cash info: {doc_result['cash_info']}")
-    except Exception as e:
-        logger.error(f"Failed to extract cash info from {doc_url}: {e}")
         doc_result["cash_info"] = None
 
     return doc_result
