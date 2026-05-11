@@ -15,14 +15,14 @@ WORKDIR /app
 # Copy dependency files first for better caching
 COPY pyproject.toml uv.lock ./
 
-# Install dependencies
-RUN uv sync --frozen --no-dev --no-install-project
+# Install dependencies (resolve for Linux target platform)
+RUN uv sync --no-dev --no-install-project
 
 # Copy application code
 COPY appeals_monitor /app/appeals_monitor
 
 # Install the project itself
-RUN uv sync --frozen --no-dev
+RUN uv sync --no-dev
 
 # Run the pipeline
 ENTRYPOINT ["uv", "run", "python", "-m", "appeals_monitor"]

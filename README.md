@@ -68,24 +68,6 @@ docker build -t appeals-monitor .
 docker run --env-file .env appeals-monitor
 ```
 
-## Azure Logic App Deployment
-
-This container is designed to be triggered by an Azure Logic App using Azure Container Instances (ACI):
-
-1. Push the Docker image to Azure Container Registry (ACR):
-   ```bash
-   az acr login --name <your-acr>
-   docker tag appeals-monitor <your-acr>.azurecr.io/appeals-monitor:latest
-   docker push <your-acr>.azurecr.io/appeals-monitor:latest
-   ```
-
-2. In your Azure Logic App, use the **Create or update container group** action to run the container:
-   - Set the image to `<your-acr>.azurecr.io/appeals-monitor:latest`
-   - Pass environment variables (secrets) via the Logic App action or reference Azure Key Vault
-   - Set restart policy to `Never` (runs once and exits)
-
-3. Optionally add a **Get logs from container** action afterwards to capture the JSON output.
-
 ## Environment Variables
 
 | Variable | Description | Required |
