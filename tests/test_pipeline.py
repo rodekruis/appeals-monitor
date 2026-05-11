@@ -532,20 +532,18 @@ class TestRunAnalysis:
     @patch("appeals_monitor.monitor.mark_processed")
     @patch("appeals_monitor.monitor.analyze_document")
     @patch("appeals_monitor.monitor.create_agent_pipeline")
+    @patch("appeals_monitor.monitor._create_model")
     @patch("appeals_monitor.monitor.list_unprocessed")
     def test_analyzes_and_notifies(
         self,
         mock_list,
+        mock_create_model,
         mock_create_agent,
         mock_analyze,
         mock_mark,
         mock_notify,
-        monkeypatch,
     ):
         from appeals_monitor.monitor import run_analysis
-
-        monkeypatch.setenv("OPENAI_ENDPOINT", "https://test.openai.azure.com/")
-        monkeypatch.setenv("OPENAI_API_VERSION", "2024-12-01")
 
         mock_list.return_value = iter(
             [
@@ -569,11 +567,8 @@ class TestRunAnalysis:
 
     @patch("appeals_monitor.monitor.notify")
     @patch("appeals_monitor.monitor.list_unprocessed")
-    def test_no_documents_skips_notification(self, mock_list, mock_notify, monkeypatch):
+    def test_no_documents_skips_notification(self, mock_list, mock_notify):
         from appeals_monitor.monitor import run_analysis
-
-        monkeypatch.setenv("OPENAI_ENDPOINT", "https://test.openai.azure.com/")
-        monkeypatch.setenv("OPENAI_API_VERSION", "2024-12-01")
 
         mock_list.return_value = iter([])
 

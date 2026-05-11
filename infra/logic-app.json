@@ -65,6 +65,12 @@
       "metadata": {
         "description": "Microsoft Teams incoming webhook URL for failure notifications"
       }
+    },
+    "azureStorageConnectionString": {
+      "type": "securestring",
+      "metadata": {
+        "description": "Azure Blob Storage connection string for document persistence"
+      }
     }
   },
   "resources": [
@@ -131,7 +137,8 @@
                             { "name": "EMAIL_FROM", "value": "[parameters('emailFrom')]" },
                             { "name": "KOBO_API_URL", "value": "[parameters('koboApiUrl')]" },
                             { "name": "KOBO_API_TOKEN", "secureValue": "[parameters('koboApiToken')]" },
-                            { "name": "KOBO_FORM_UID", "value": "[parameters('koboFormUid')]" }
+                            { "name": "KOBO_FORM_UID", "value": "[parameters('koboFormUid')]" },
+                            { "name": "AZURE_STORAGE_CONNECTION_STRING", "secureValue": "[parameters('azureStorageConnectionString')]" }
                           ]
                         }
                       }

@@ -38,6 +38,7 @@ jobs:
             koboApiToken=${{ secrets.KOBO_API_TOKEN }}
             koboFormUid=${{ secrets.KOBO_FORM_UID }}
             teamsWebhookUrl=${{ secrets.TEAMS_WEBHOOK_URL }}
+            azureStorageConnectionString=${{ secrets.AZURE_STORAGE_CONNECTION_STRING }}
 
       - name: Assign Contributor role to Logic App identity
         run: |

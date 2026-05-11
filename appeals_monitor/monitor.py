@@ -3,21 +3,16 @@
 from typing import List
 import os
 
-from langchain_openai import AzureChatOpenAI
-
 from appeals_monitor.logger import logger
 from appeals_monitor.analysis import create_agent_pipeline, analyze_document
 from appeals_monitor.notify import notify
 from appeals_monitor.storage import list_unprocessed, mark_processed
 
 
-def run_analysis() -> List[dict]:
-    """Reads parsed documents from blob storage, runs LLM analysis, and sends notifications.
+def _create_model():
+    """Create the Azure OpenAI model. Separated to keep credential validation lazy."""
+    from langchain_openai import AzureChatOpenAI
 
-    Only processes documents that haven't been analyzed yet (no 'processed_at' timestamp).
-    Returns a list of analysis results.
-    """
-    # Validate required configuration
     endpoint = os.getenv("OPENAI_ENDPOINT")
     api_version = os.getenv("OPENAI_API_VERSION")
     if not endpoint or not api_version:
@@ -25,17 +20,30 @@ def run_analysis() -> List[dict]:
             "Missing required environment variables: OPENAI_ENDPOINT and OPENAI_API_VERSION must be set."
         )
 
-    model = AzureChatOpenAI(
+    return AzureChatOpenAI(
         azure_deployment=os.getenv("AZURE_OPENAI_DEPLOYMENT", "gpt-5.4"),
         azure_endpoint=endpoint,
         openai_api_version=api_version,
     )
 
-    # Create agent once and reuse across all documents
+
+def run_analysis() -> List[dict]:
+    """Reads parsed documents from blob storage, runs LLM analysis, and sends notifications.
+
+    Only processes documents that haven't been analyzed yet (no 'processed_at' timestamp).
+    The OpenAI client is only initialized when there are documents to process.
+    Returns a list of analysis results.
+    """
+    docs = list(list_unprocessed())
+    if not docs:
+        logger.info("No new documents to analyze.")
+        return []
+
+    model = _create_model()
     agent = create_agent_pipeline(model)
 
     results = []
-    for doc in list_unprocessed():
+    for doc in docs:
         doc_url = doc["document_url"]
         markdown = doc["markdown"]
         blob_name = doc["blob_name"]
