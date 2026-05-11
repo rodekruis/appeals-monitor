@@ -24,5 +24,8 @@ COPY appeals_monitor /app/appeals_monitor
 # Install the project itself
 RUN uv sync --frozen --no-dev
 
+# Ensure Python output is sent straight to logs (no buffering)
+ENV PYTHONUNBUFFERED=1
+
 # Run the pipeline
 ENTRYPOINT ["uv", "run", "python", "-m", "appeals_monitor"]
