@@ -104,7 +104,7 @@ Required GitHub secrets: `ACR_NAME`, `ACR_PASSWORD`.
 
 | Variable | Description | Required |
 |----------|-------------|----------|
-| `KEY_VAULT_URL` | Azure Key Vault URL (production) — loads all other secrets automatically | No |
+
 | `OPENAI_API_KEY` | Azure OpenAI API key | Yes |
 | `OPENAI_ENDPOINT` | Azure OpenAI endpoint URL | Yes |
 | `OPENAI_API_VERSION` | Azure OpenAI API version | Yes |
@@ -117,12 +117,3 @@ Required GitHub secrets: `ACR_NAME`, `ACR_PASSWORD`.
 | `KOBO_API_URL` | KoboToolbox API base URL (default: https://kobo.ifrc.org) | No |
 | `KOBO_API_TOKEN` | KoboToolbox API token | Yes |
 | `KOBO_FORM_UID` | Asset UID of the Kobo subscription form | Yes |
-
-### Production (Azure Key Vault)
-
-In production, set only `KEY_VAULT_URL` as an environment variable on the container.
-All other secrets are loaded automatically from the vault at startup.
-Secret names use hyphens (e.g., `SENDGRID-API-KEY`) and are mapped to env vars with
-underscores (`SENDGRID_API_KEY`).
-
-The container's managed identity needs the **Key Vault Secrets User** role on the vault.
