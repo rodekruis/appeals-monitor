@@ -9,8 +9,8 @@ from jinja2 import Environment, FileSystemLoader
 from sendgrid import SendGridAPIClient
 from sendgrid.helpers.mail import Mail
 
-from appeals_monitor.logger import logger
-from appeals_monitor.analysis import KOBO_CHOICE_TO_SECTOR
+from appeals_monitor.config import logger
+from appeals_monitor.models import KOBO_CHOICE_TO_SECTOR
 
 _TEMPLATE_DIR = Path(__file__).parent / "templates"
 _jinja_env = Environment(

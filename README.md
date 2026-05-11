@@ -4,12 +4,13 @@ IFRC Appeal Document Monitor — extracts structured information from IFRC GO ap
 
 ## Description
 
-This pipeline has two independent stages connected via Azure Blob Storage:
+This pipeline has two independent stages:
 
 ### 1. ETL (`etl`)
 - Fetches recent appeal documents from the [IFRC GO platform](https://go.ifrc.org/)
-- Converts PDFs to markdown using Docling
-- Uploads parsed documents to Azure Blob Storage
+- Filters by document type (DREF Operation, Operational Strategy, Emergency Appeal)
+- Converts PDFs to markdown using [Docling](https://github.com/DS4SD/docling) (CPU-only, with OCR fallback)
+- Uploads parsed documents to Azure Blob Storage (organized by document type)
 - Skips documents already in blob storage
 
 ### 2. Analysis + Notification (`analyze`)
@@ -20,6 +21,22 @@ This pipeline has two independent stages connected via Azure Blob Storage:
    - **Cash info**: modality, FSP, digital tools
 - Sends personalized email notifications based on sector preferences (via KoboToolbox)
 - Marks documents as processed so they aren't re-analyzed
+
+## Project structure
+
+```
+appeals_monitor/
+    __main__.py       # CLI entrypoint (etl | analyze | all)
+    config.py         # Logging setup + Key Vault secret loading
+    models.py         # Pydantic models, Sector enum, Kobo mappings
+    etl.py            # Fetch, convert (Docling), upload documents
+    analysis.py       # LLM prompt rendering + agent-based extraction
+    monitor.py        # Orchestrator: analysis pipeline + notifications
+    notify.py         # Email formatting (Jinja2) + SendGrid + KoboToolbox
+    storage.py        # Azure Blob Storage helpers
+    prompts/          # Jinja2 prompt templates
+    templates/        # Jinja2 email templates
+```
 
 ## Setup
 
@@ -56,6 +73,12 @@ This pipeline has two independent stages connected via Azure Blob Storage:
    uv run python -m appeals_monitor analyze
    ```
 
+### Running tests
+
+```bash
+uv run pytest
+```
+
 ## Docker
 
 ### Build
@@ -67,6 +90,15 @@ docker build -t appeals-monitor .
 ```bash
 docker run --env-file .env appeals-monitor
 ```
+
+## CI/CD
+
+The GitHub Actions workflow (`.github/workflows/ci-cd.yml`) runs on every push/PR to `main`:
+
+1. **Test** — checks lock file (`uv lock --check`), installs deps, runs pytest
+2. **Build & Push** (main only) — builds Docker image, pushes to Azure Container Registry
+
+Required GitHub secrets: `ACR_NAME`, `ACR_PASSWORD`.
 
 ## Environment Variables
 
@@ -86,10 +118,11 @@ docker run --env-file .env appeals-monitor
 | `KOBO_API_TOKEN` | KoboToolbox API token | Yes |
 | `KOBO_FORM_UID` | Asset UID of the Kobo subscription form | Yes |
 
-### Production (Key Vault)
+### Production (Azure Key Vault)
 
-In production, set only `KEY_VAULT_URL` as an environment variable. All other secrets are loaded
-automatically from the vault at startup. Secret names use hyphens (e.g., `SENDGRID-API-KEY`)
-and are mapped to env vars with underscores (`SENDGRID_API_KEY`).
+In production, set only `KEY_VAULT_URL` as an environment variable on the container.
+All other secrets are loaded automatically from the vault at startup.
+Secret names use hyphens (e.g., `SENDGRID-API-KEY`) and are mapped to env vars with
+underscores (`SENDGRID_API_KEY`).
 
 The container's managed identity needs the **Key Vault Secrets User** role on the vault.

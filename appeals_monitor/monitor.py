@@ -3,7 +3,7 @@
 from typing import List
 import os
 
-from appeals_monitor.logger import logger
+from appeals_monitor.config import logger
 from appeals_monitor.analysis import create_agent_pipeline, analyze_document
 from appeals_monitor.notify import notify
 from appeals_monitor.storage import list_unprocessed, mark_processed
@@ -21,7 +21,7 @@ def _create_model():
         )
 
     return AzureChatOpenAI(
-        azure_deployment=os.getenv("AZURE_OPENAI_DEPLOYMENT", "gpt-5.4"),
+        azure_deployment=os.getenv("AZURE_OPENAI_DEPLOYMENT"),
         azure_endpoint=endpoint,
         openai_api_version=api_version,
     )

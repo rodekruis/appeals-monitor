@@ -14,7 +14,7 @@ from docling.document_converter import (
 )
 from docling.datamodel.pipeline_options import PdfPipelineOptions, OcrAutoOptions
 
-from appeals_monitor.logger import logger
+from appeals_monitor.config import logger
 from appeals_monitor.storage import upload_document, document_exists
 
 # Only fetch these document types (server-side filtering not supported)

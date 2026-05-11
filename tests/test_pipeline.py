@@ -9,7 +9,7 @@ from appeals_monitor.notify import (
     get_recipients_from_kobo,
     _filter_results_by_sectors,
 )
-from appeals_monitor.analysis import (
+from appeals_monitor.models import (
     ResponseInfo,
     PlannedIntervention,
     CashInfo,

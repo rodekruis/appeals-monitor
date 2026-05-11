@@ -7,7 +7,7 @@ from typing import Generator
 
 from azure.storage.blob import BlobServiceClient
 
-from appeals_monitor.logger import logger
+from appeals_monitor.config import logger
 
 _CONTAINER_NAME = "appeals"
 
