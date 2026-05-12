@@ -1,12 +1,14 @@
 FROM python:3.13-slim
 
 # Install system dependencies
-# libgl1-mesa-glx: OpenGL + transitive X11/xcb libs (needed by pypdfium2/docling)
-# libglib2.0-0:   GLib (needed by document processing pipeline)
+# libgl1:       OpenGL (needed by pypdfium2/docling)
+# libxcb1:      X11 client-side library
+# libglib2.0-0: GLib (needed by document processing pipeline)
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
         curl \
-        libgl1-mesa-glx \
+        libgl1 \
+        libxcb1 \
         libglib2.0-0 && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
