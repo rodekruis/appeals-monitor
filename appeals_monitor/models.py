@@ -89,7 +89,6 @@ def _parse_flexible_date(value) -> date | None:
 
 
 class ResponseInfo(BaseModel):
-    document_url: str
     appeal_code: str
     hazard: str
     country: str

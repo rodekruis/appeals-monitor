@@ -66,6 +66,9 @@ def analyze_document(
         )
         extraction: AppealExtraction = result["structured_response"]
         doc_result["general_info"] = extraction.general_info.model_dump(mode="json")
+        doc_result["general_info"][
+            "document_url"
+        ] = doc_url  # injected post-extraction for notification purposes; not part of the Pydantic model
         doc_result["interventions"] = {
             "interventions": [
                 i.model_dump(mode="json") for i in extraction.interventions

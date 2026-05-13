@@ -40,5 +40,6 @@ We found {{ results | length }} new Emergency Appeal document{{ "s" if results |
 
 ---
 
-*This email was generated automatically by the Appeals Monitor. \\
-[Update your preferences or unsubscribe](https://ee.ifrc.org/x/zBtCj5FW) or [report a bug](https://github.com/rodekruis/appeals-monitor/issues/new?template=bug_report.md)*.
+*This email was generated automatically by the Appeals Monitor.
+
+[Update your preferences, unsubscribe](https://ee.ifrc.org/x/zBtCj5FW) or [report a bug](https://github.com/rodekruis/appeals-monitor/issues/new?template=bug_report.md)*.
