@@ -1,0 +1,333 @@
+{
+    "definition": {
+        "$schema": "https://schema.management.azure.com/providers/Microsoft.Logic/schemas/2016-06-01/workflowdefinition.json#",
+        "contentVersion": "1.0.0.0",
+        "triggers": {
+            "Recurrence": {
+                "recurrence": {
+                    "interval": 6,
+                    "frequency": "Hour"
+                },
+                "evaluatedRecurrence": {
+                    "interval": 6,
+                    "frequency": "Hour"
+                },
+                "type": "Recurrence"
+            }
+        },
+        "actions": {
+            "Create_or_update_a_container_group": {
+                "runAfter": {},
+                "type": "ApiConnection",
+                "inputs": {
+                    "host": {
+                        "connection": {
+                            "name": "@parameters('$connections')['aci']['connectionId']"
+                        }
+                    },
+                    "method": "put",
+                    "body": {
+                        "location": "westeurope",
+                        "properties": {
+                            "containers": [
+                                {
+                                    "name": "appeals-monitor-container",
+                                    "properties": {
+                                        "image": "510crmcr.azurecr.io/appeals-monitor:latest",
+                                        "command": [
+                                            "uv",
+                                            "run",
+                                            "python",
+                                            "-m",
+                                            "appeals_monitor"
+                                        ],
+                                        "environmentVariables": [
+                                            {
+                                                "name": "OPENAI_ENDPOINT",
+                                                "value": "__OPENAI_ENDPOINT__"
+                                            },
+                                            {
+                                                "name": "OPENAI_API_VERSION",
+                                                "value": "__OPENAI_API_VERSION__"
+                                            },
+                                            {
+                                                "name": "AZURE_OPENAI_DEPLOYMENT",
+                                                "value": "__AZURE_OPENAI_DEPLOYMENT__"
+                                            },
+                                            {
+                                                "name": "OPENAI_API_KEY",
+                                                "value": "__OPENAI_API_KEY__"
+                                            },
+                                            {
+                                                "name": "GO_AUTH_TOKEN",
+                                                "value": "__GO_AUTH_TOKEN__"
+                                            },
+                                            {
+                                                "name": "LAST_N_DAYS",
+                                                "value": "__LAST_N_DAYS__"
+                                            },
+                                            {
+                                                "name": "AZURE_STORAGE_CONNECTION_STRING",
+                                                "value": "__AZURE_STORAGE_CONNECTION_STRING__"
+                                            },
+                                            {
+                                                "name": "SENDGRID_API_KEY",
+                                                "value": "__SENDGRID_API_KEY__"
+                                            },
+                                            {
+                                                "name": "EMAIL_FROM",
+                                                "value": "__EMAIL_FROM__"
+                                            },
+                                            {
+                                                "name": "KOBO_API_URL",
+                                                "value": "__KOBO_API_URL__"
+                                            },
+                                            {
+                                                "name": "KOBO_API_TOKEN",
+                                                "value": "__KOBO_API_TOKEN__"
+                                            },
+                                            {
+                                                "name": "KOBO_FORM_UID",
+                                                "value": "__KOBO_FORM_UID__"
+                                            }
+                                        ],
+                                        "resources": {
+                                            "requests": {
+                                                "memoryInGB": "15",
+                                                "cpu": "4"
+                                            }
+                                        }
+                                    }
+                                }
+                            ],
+                            "osType": "Linux",
+                            "sku": "Standard",
+                            "imageRegistryCredentials": [
+                                {
+                                    "server": "510crmcr.azurecr.io",
+                                    "username": "510crmcr",
+                                    "password": "__ACR_PASSWORD__"
+                                }
+                            ],
+                            "restartPolicy": "Never"
+                        }
+                    },
+                    "path": "/subscriptions/@{encodeURIComponent('6afb807c-68ed-4a17-8665-78e5ff39bd4f')}/resourceGroups/@{encodeURIComponent('appeals-monitor')}/providers/Microsoft.ContainerInstance/containerGroups/@{encodeURIComponent('appeals-monitor-container-group')}",
+                    "queries": {
+                        "x-ms-api-version": "2023-05-01"
+                    }
+                }
+            },
+            "Initialize_variables": {
+                "runAfter": {
+                    "Create_or_update_a_container_group": [
+                        "Succeeded"
+                    ]
+                },
+                "type": "InitializeVariable",
+                "inputs": {
+                    "variables": [
+                        {
+                            "name": "ContainerState",
+                            "type": "string",
+                            "value": "Running"
+                        }
+                    ]
+                }
+            },
+            "Until_container_is_running": {
+                "actions": {
+                    "Get_properties_of_a_container_group": {
+                        "type": "ApiConnection",
+                        "inputs": {
+                            "host": {
+                                "connection": {
+                                    "name": "@parameters('$connections')['aci']['connectionId']"
+                                }
+                            },
+                            "method": "get",
+                            "path": "/subscriptions/@{encodeURIComponent('6afb807c-68ed-4a17-8665-78e5ff39bd4f')}/resourceGroups/@{encodeURIComponent('appeals-monitor')}/providers/Microsoft.ContainerInstance/containerGroups/@{encodeURIComponent('appeals-monitor-container-group')}",
+                            "queries": {
+                                "x-ms-api-version": "2023-05-01"
+                            }
+                        }
+                    },
+                    "For_each_container": {
+                        "foreach": "@body('Get_properties_of_a_container_group')['properties']['containers']",
+                        "actions": {
+                            "If_container_is_terminated": {
+                                "actions": {
+                                    "Update_ContainerState": {
+                                        "type": "SetVariable",
+                                        "inputs": {
+                                            "name": "ContainerState",
+                                            "value": "Terminated"
+                                        }
+                                    }
+                                },
+                                "else": {
+                                    "actions": {
+                                        "Delay": {
+                                            "type": "Wait",
+                                            "inputs": {
+                                                "interval": {
+                                                    "count": 1,
+                                                    "unit": "Minute"
+                                                }
+                                            }
+                                        }
+                                    }
+                                },
+                                "expression": {
+                                    "and": [
+                                        {
+                                            "equals": [
+                                                "@items('For_each_container')?['properties']?['instanceView']?['currentState']?['state']",
+                                                "Terminated"
+                                            ]
+                                        }
+                                    ]
+                                },
+                                "type": "If"
+                            }
+                        },
+                        "runAfter": {
+                            "Get_properties_of_a_container_group": [
+                                "Succeeded"
+                            ]
+                        },
+                        "type": "Foreach"
+                    }
+                },
+                "runAfter": {
+                    "Initialize_variables": [
+                        "Succeeded"
+                    ]
+                },
+                "expression": "@not(equals(variables('ContainerState'), 'Running'))",
+                "limit": {
+                    "count": 60,
+                    "timeout": "PT1H"
+                },
+                "type": "Until"
+            },
+            "Get_logs_from_a_container_instance": {
+                "runAfter": {
+                    "Until_container_is_running": [
+                        "Succeeded",
+                        "TimedOut",
+                        "Skipped",
+                        "Failed"
+                    ]
+                },
+                "type": "ApiConnection",
+                "inputs": {
+                    "host": {
+                        "connection": {
+                            "name": "@parameters('$connections')['aci']['connectionId']"
+                        }
+                    },
+                    "method": "get",
+                    "path": "/subscriptions/@{encodeURIComponent('6afb807c-68ed-4a17-8665-78e5ff39bd4f')}/resourceGroups/@{encodeURIComponent('appeals-monitor')}/providers/Microsoft.ContainerInstance/containerGroups/@{encodeURIComponent('appeals-monitor-container-group')}/containers/@{encodeURIComponent('appeals-monitor-container')}/logs",
+                    "queries": {
+                        "x-ms-api-version": "2023-05-01"
+                    }
+                }
+            },
+            "Delete_a_container_group": {
+                "runAfter": {
+                    "Get_logs_from_a_container_instance": [
+                        "Succeeded",
+                        "TimedOut",
+                        "Skipped",
+                        "Failed"
+                    ]
+                },
+                "type": "ApiConnection",
+                "inputs": {
+                    "host": {
+                        "connection": {
+                            "name": "@parameters('$connections')['aci']['connectionId']"
+                        }
+                    },
+                    "method": "delete",
+                    "path": "/subscriptions/@{encodeURIComponent('6afb807c-68ed-4a17-8665-78e5ff39bd4f')}/resourceGroups/@{encodeURIComponent('appeals-monitor')}/providers/Microsoft.ContainerInstance/containerGroups/@{encodeURIComponent('appeals-monitor-container-group')}",
+                    "queries": {
+                        "x-ms-api-version": "2023-05-01"
+                    }
+                }
+            },
+            "if_logs_contain_errors": {
+                "actions": {
+                    "Post_message_in_a_chat_or_channel": {
+                        "type": "ApiConnection",
+                        "inputs": {
+                            "host": {
+                                "connection": {
+                                    "name": "@parameters('$connections')['teams']['connectionId']"
+                                }
+                            },
+                            "method": "post",
+                            "body": {
+                                "recipient": "jmargutti@redcross.nl",
+                                "messageBody": "<p class=\"editor-paragraph\">ERROR: <a href=\"https://portal.azure.com/#@rodekruis.onmicrosoft.com/resource/subscriptions/6afb807c-68ed-4a17-8665-78e5ff39bd4f/resourceGroups/appeals-monitor/providers/Microsoft.Logic/workflows/appeals-monitor-app/logicApp\" class=\"editor-link\">appeals-monitor</a> failed.</p>"
+                            },
+                            "path": "/beta/teams/conversation/message/poster/@{encodeURIComponent('Flow bot')}/location/@{encodeURIComponent('Chat with Flow bot')}"
+                        }
+                    }
+                },
+                "runAfter": {
+                    "Get_logs_from_a_container_instance": [
+                        "Succeeded"
+                    ]
+                },
+                "else": {
+                    "actions": {}
+                },
+                "expression": {
+                    "or": [
+                        {
+                            "contains": [
+                                "@toLower(body('Get_logs_from_a_container_instance')?['content'])",
+                                "error"
+                            ]
+                        },
+                        {
+                            "contains": [
+                                "@toLower(body('Get_logs_from_a_container_instance')?['content'])",
+                                "traceback"
+                            ]
+                        }
+                    ]
+                },
+                "type": "If"
+            }
+        },
+        "outputs": {},
+        "parameters": {
+            "$connections": {
+                "type": "Object",
+                "defaultValue": {}
+            }
+        }
+    },
+    "parameters": {
+        "$connections": {
+            "type": "Object",
+            "value": {
+                "aci": {
+                    "id": "/subscriptions/6afb807c-68ed-4a17-8665-78e5ff39bd4f/providers/Microsoft.Web/locations/westeurope/managedApis/aci",
+                    "connectionId": "/subscriptions/6afb807c-68ed-4a17-8665-78e5ff39bd4f/resourceGroups/appeals-monitor/providers/Microsoft.Web/connections/aci",
+                    "connectionName": "aci",
+                    "connectionProperties": {}
+                },
+                "teams": {
+                    "id": "/subscriptions/6afb807c-68ed-4a17-8665-78e5ff39bd4f/providers/Microsoft.Web/locations/westeurope/managedApis/teams",
+                    "connectionId": "/subscriptions/6afb807c-68ed-4a17-8665-78e5ff39bd4f/resourceGroups/appeals-monitor/providers/Microsoft.Web/connections/teams",
+                    "connectionName": "teams",
+                    "connectionProperties": {}
+                }
+            }
+        }
+    }
+}
