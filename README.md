@@ -19,7 +19,7 @@ This pipeline has two independent stages:
    - **General info**: appeal code, hazard, country, people affected/targeted, dates, gaps
    - **Planned interventions**: sector, budget, people targeted, activities
    - **Cash info**: modality, FSP, digital tools
-- Sends personalized email notifications based on sector preferences (via KoboToolbox)
+- Sends personalized email notifications based on user preferences (submitted via Kobo)
 - Marks documents as processed so they aren't re-analyzed
 
 ## Project structure
@@ -36,6 +36,12 @@ appeals_monitor/
     storage.py        # Azure Blob Storage helpers
     prompts/          # Jinja2 prompt templates
     templates/        # Jinja2 email templates
+infra/
+    logic_app.yaml    # Azure Logic App workflow definition
+kobo/
+    appeals_monitor_subscription.xlsx  # Kobo subscription form
+tests/
+    test_pipeline.py  # Pipeline tests
 ```
 
 ## Setup
