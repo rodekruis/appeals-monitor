@@ -11,11 +11,11 @@ We found {{ results | length }} new Emergency Appeal document{{ "s" if results |
 
 **📋 {{ doc.general_info.country or 'Unknown country' }} - {{ doc.general_info.hazard or 'Unknown hazard' }}**
 
-- **Description:** {{ doc.general_info.event_description or 'N/A' }}
 - **People affected:** {{ "{:,}".format(doc.general_info.people_affected) if doc.general_info.people_affected else 'N/A' }}
 - **People targeted:** {{ "{:,}".format(doc.general_info.people_targeted) if doc.general_info.people_targeted else 'N/A' }}
 - **Operation period:** {{ doc.general_info.start_date or '?' }} to {{ doc.general_info.end_date or '?' }}
 {% if doc.general_info.gaps_in_response %}
+- **Description:** {{ doc.general_info.event_description or 'N/A' }}
 - **Gaps in the response:** {{ doc.general_info.gaps_in_response }}
 {% endif %}
 {% if doc.interventions %}
@@ -24,7 +24,7 @@ We found {{ results | length }} new Emergency Appeal document{{ "s" if results |
 **🎯 Planned Interventions ({{ doc.interventions | length }}):**
 
 {% for intv in doc.interventions %}
-{{ loop.index }}. **{{ intv.sector or 'N/A' }}** - Budget: {{ "{:,}".format(intv.budget) if intv.budget else 'N/A' }} CHF, People targeted: {{ "{:,}".format(intv.people_targeted) if intv.people_targeted else 'N/A' }}, Activities:
+{{ loop.index }}. **{{ intv.sector or 'N/A' }}** (budget: {{ "{:,}".format(intv.budget) if intv.budget else 'N/A' }} CHF, people targeted: {{ "{:,}".format(intv.people_targeted) if intv.people_targeted else 'N/A' }}):
 {{ intv.activities or '' }}
 {% endfor %}
 {% endif %}
@@ -40,6 +40,6 @@ We found {{ results | length }} new Emergency Appeal document{{ "s" if results |
 
 ---
 
-*This email was generated automatically by the Appeals Monitor.
+This email was generated automatically by the Appeals Monitor.
 
-[Update your preferences, unsubscribe](https://ee.ifrc.org/x/zBtCj5FW) or [report a bug](https://github.com/rodekruis/appeals-monitor/issues/new?template=bug_report.md)*.
+[Update your preferences, unsubscribe](https://ee.ifrc.org/x/zBtCj5FW) or [report a bug](https://github.com/rodekruis/appeals-monitor/issues/new?template=bug_report.md).
