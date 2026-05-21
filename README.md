@@ -110,7 +110,6 @@ Required GitHub secrets: `ACR_NAME`, `ACR_PASSWORD`.
 
 | Variable | Description | Required |
 |----------|-------------|----------|
-
 | `OPENAI_API_KEY` | Azure OpenAI API key | Yes |
 | `OPENAI_ENDPOINT` | Azure OpenAI endpoint URL | Yes |
 | `OPENAI_API_VERSION` | Azure OpenAI API version | Yes |
