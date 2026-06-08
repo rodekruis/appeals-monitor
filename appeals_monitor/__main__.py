@@ -45,9 +45,14 @@ def _run_etl():
     logger.info(f"Starting ETL pipeline (last {last_n_days} days)...")
     try:
         count = run_etl(last_n_days=last_n_days)
+    except Exception as exc:
+        logger.error(f"ETL pipeline execution failed: {exc}")
+        sys.exit(1)
+
+    try:
         logger.info(f"ETL completed. Uploaded {count} documents.")
-    except Exception as e:
-        logger.error(f"ETL pipeline failed: {e}")
+    except Exception as exc:
+        logger.error(f"Failed to log ETL completion: {exc}")
         sys.exit(1)
 
 
@@ -57,11 +62,26 @@ def _run_analysis():
     logger.info("Starting analysis + notification pipeline...")
     try:
         results = run_analysis()
+    except Exception as exc:
+        logger.error(f"Analysis pipeline execution failed: {exc}")
+        sys.exit(1)
+
+    try:
         logger.info(f"Analysis completed. Processed {len(results)} documents.")
+    except Exception as exc:
+        logger.error(f"Failed to log analysis completion: {exc}")
+        sys.exit(1)
+
+    try:
         output = json.dumps(results, indent=2, default=str)
+    except TypeError as exc:
+        logger.error(f"Failed to serialize analysis results: {exc}")
+        sys.exit(1)
+
+    try:
         print(output)
-    except Exception as e:
-        logger.error(f"Analysis pipeline failed: {e}")
+    except Exception as exc:
+        logger.error(f"Failed to print analysis results: {exc}")
         sys.exit(1)
 
 

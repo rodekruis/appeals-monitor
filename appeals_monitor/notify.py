@@ -140,67 +140,76 @@ def get_recipients_from_kobo() -> List[dict]:
     where sectors is a set of full sector labels (empty = all sectors).
 
     Requires the following environment variables:
-        KOBO_API_URL: KoboToolbox API base URL (e.g. https://kobo.ifrc.org)
+        KOBO_API_URL: KoboToolbox API base URL
         KOBO_API_TOKEN: KoboToolbox API token
         KOBO_FORM_UID: Asset UID of the form containing email subscriptions
     """
-    api_url = os.getenv("KOBO_API_URL", "https://kobo.ifrc.org")
+    api_url = os.getenv("KOBO_API_URL")
     api_token = os.getenv("KOBO_API_TOKEN")
     form_uid = os.getenv("KOBO_FORM_UID")
     email_field = "email"
 
-    if not api_token or not form_uid:
+    if not api_url or not api_token or not form_uid:
         logger.warning(
-            "Kobo not configured (missing KOBO_API_TOKEN/KOBO_FORM_UID), no recipients fetched."
+            "Kobo not configured (missing KOBO_API_URL/KOBO_API_TOKEN/KOBO_FORM_UID), no recipients fetched."
         )
         return []
 
     headers = {"Authorization": f"Token {api_token}"}
     base_url = f"{api_url.rstrip('/')}/api/v2/assets/{form_uid}/data.json"
 
-    try:
-        # Fetch all submissions with pagination
-        submissions = []
-        url = base_url
-        params = {"sort": '{"_submission_time": 1}', "limit": 1000}
+    submissions = []
+    url = base_url
+    params = {"sort": '{"_submission_time": 1}', "limit": 1000}
 
-        while url:
+    while url:
+        try:
             response = requests.get(url, headers=headers, params=params, timeout=30)
+        except requests.RequestException as exc:
+            raise RuntimeError(f"Failed to request Kobo submissions: {exc}") from exc
+
+        try:
             response.raise_for_status()
+        except requests.HTTPError as exc:
+            raise RuntimeError(
+                f"Kobo submissions request returned an error: {exc}"
+            ) from exc
+
+        try:
             data = response.json()
-            submissions.extend(data.get("results", []))
-            url = data.get("next")
-            params = None  # 'next' URL already includes query params
+        except ValueError as exc:
+            raise RuntimeError(
+                f"Failed to decode Kobo submissions response JSON: {exc}"
+            ) from exc
 
-        # Keep only the latest submission per email address
-        latest_by_email: dict = {}
-        for s in submissions:
-            email = (s.get(email_field) or "").strip().lower()
-            if email:
-                latest_by_email[email] = s
+        submissions.extend(data.get("results", []))
+        url = data.get("next")
+        params = None  # 'next' URL already includes query params
 
-        # Filter to only those who opted in, and resolve sector preferences
-        recipients = []
-        for email, s in latest_by_email.items():
-            if s.get("active") != "yes":
-                continue
-            # Parse select_multiple sectors (space-separated choice names)
-            raw_sectors = (s.get("sectors_of_interest") or "").strip()
-            sector_labels = set()
-            if raw_sectors:
-                for choice in raw_sectors.split():
-                    sector = KOBO_CHOICE_TO_SECTOR.get(choice)
-                    if sector:
-                        sector_labels.add(sector.value)
-            name = (s.get("name") or "").strip()
-            recipients.append({"email": email, "name": name, "sectors": sector_labels})
+    latest_by_email: dict = {}
+    for s in submissions:
+        email = (s.get(email_field) or "").strip().lower()
+        if email:
+            latest_by_email[email] = s
 
-        logger.info(
-            f"Fetched {len(recipients)} active recipient(s) from Kobo form {form_uid}."
-        )
-        return recipients
-    except Exception as e:
-        raise RuntimeError(f"Failed to fetch recipients from Kobo: {e}") from e
+    recipients = []
+    for email, s in latest_by_email.items():
+        if s.get("active") != "yes":
+            continue
+        raw_sectors = (s.get("sectors_of_interest") or "").strip()
+        sector_labels = set()
+        if raw_sectors:
+            for choice in raw_sectors.split():
+                sector = KOBO_CHOICE_TO_SECTOR.get(choice)
+                if sector:
+                    sector_labels.add(sector.value)
+        name = (s.get("name") or "").strip()
+        recipients.append({"email": email, "name": name, "sectors": sector_labels})
+
+    logger.info(
+        f"Fetched {len(recipients)} active recipient(s) from Kobo form {form_uid}."
+    )
+    return recipients
 
 
 def notify(results: List[dict]) -> None:

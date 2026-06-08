@@ -64,22 +64,60 @@ def analyze_document(
                 ]
             }
         )
+    except Exception as exc:
+        logger.error(f"Agent invocation failed for {doc_url}: {exc}")
+        doc_result["general_info"] = None
+        doc_result["interventions"] = None
+        doc_result["cash_info"] = None
+        return doc_result
+
+    try:
         extraction: AppealExtraction = result["structured_response"]
-        doc_result["general_info"] = extraction.general_info.model_dump(mode="json")
-        doc_result["general_info"][
-            "document_url"
-        ] = doc_url  # injected post-extraction for notification purposes; not part of the Pydantic model
-        doc_result["interventions"] = {
+    except KeyError as exc:
+        logger.error(f"Structured response missing for {doc_url}: {exc}")
+        doc_result["general_info"] = None
+        doc_result["interventions"] = None
+        doc_result["cash_info"] = None
+        return doc_result
+
+    try:
+        general_info = extraction.general_info.model_dump(mode="json")
+    except Exception as exc:
+        logger.error(f"Failed to serialize general info for {doc_url}: {exc}")
+        doc_result["general_info"] = None
+        doc_result["interventions"] = None
+        doc_result["cash_info"] = None
+        return doc_result
+
+    general_info["document_url"] = (
+        doc_url  # injected post-extraction for notification purposes; not part of the Pydantic model
+    )
+
+    try:
+        interventions = {
             "interventions": [
                 i.model_dump(mode="json") for i in extraction.interventions
             ]
         }
-        doc_result["cash_info"] = extraction.cash_info.model_dump(mode="json")
-        logger.info(f"Extracted: {doc_result['general_info']}")
-    except Exception as e:
-        logger.error(f"Failed to extract data from {doc_url}: {e}")
+    except Exception as exc:
+        logger.error(f"Failed to serialize interventions for {doc_url}: {exc}")
         doc_result["general_info"] = None
         doc_result["interventions"] = None
         doc_result["cash_info"] = None
+        return doc_result
+
+    try:
+        cash_info = extraction.cash_info.model_dump(mode="json")
+    except Exception as exc:
+        logger.error(f"Failed to serialize cash info for {doc_url}: {exc}")
+        doc_result["general_info"] = None
+        doc_result["interventions"] = None
+        doc_result["cash_info"] = None
+        return doc_result
+
+    doc_result["general_info"] = general_info
+    doc_result["interventions"] = interventions
+    doc_result["cash_info"] = cash_info
+    logger.info(f"Extracted: {doc_result['general_info']}")
 
     return doc_result

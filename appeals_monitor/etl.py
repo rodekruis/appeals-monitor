@@ -4,6 +4,7 @@ from typing import List
 from datetime import datetime, timedelta
 import os
 import tempfile
+import pypdfium2 as pdfium
 
 import requests
 from docling.document_converter import (
@@ -41,8 +42,6 @@ def _calculate_timeout(num_pages: int) -> float:
 def _get_page_count(pdf_path: str) -> int:
     """Get number of pages in a PDF without full conversion."""
     try:
-        import pypdfium2 as pdfium
-
         pdf = pdfium.PdfDocument(pdf_path)
         count = len(pdf)
         pdf.close()
@@ -80,14 +79,23 @@ def _download_document(document_url: str) -> str:
     }
     try:
         response = requests.get(document_url, headers=headers, timeout=60)
-        response.raise_for_status()
-    except Exception as e:
-        logger.error(f"Failed to download {document_url}: {e}")
+    except requests.RequestException as exc:
+        logger.error(f"Failed to request {document_url}: {exc}")
         return ""
 
-    with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
-        tmp.write(response.content)
-        return tmp.name
+    try:
+        response.raise_for_status()
+    except requests.HTTPError as exc:
+        logger.error(f"Download returned an error for {document_url}: {exc}")
+        return ""
+
+    try:
+        with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
+            tmp.write(response.content)
+            return tmp.name
+    except OSError as exc:
+        logger.error(f"Failed to write downloaded PDF for {document_url}: {exc}")
+        return ""
 
 
 def get_documents(last_n_days: int = 7) -> List[tuple[str, str, str]]:
@@ -99,7 +107,7 @@ def get_documents(last_n_days: int = 7) -> List[tuple[str, str, str]]:
     to_date = datetime.now().strftime("%Y-%m-%d")
     from_date = (datetime.now() - timedelta(days=last_n_days)).strftime("%Y-%m-%d")
 
-    url = "https://goadmin.ifrc.org/api/v2/appeal_document/"
+    url = f"{os.getenv('GO_API_URL').rstrip('/')}/appeal_document/"
     params = {"created_at__gte": from_date, "created_at__lte": to_date}
     headers = {
         "accept": "application/json",
@@ -107,10 +115,20 @@ def get_documents(last_n_days: int = 7) -> List[tuple[str, str, str]]:
     }
     try:
         response = requests.get(url, headers=headers, params=params, timeout=30)
+    except requests.RequestException as exc:
+        logger.error(f"Failed to request appeal documents: {exc}")
+        return []
+
+    try:
         response.raise_for_status()
+    except requests.HTTPError as exc:
+        logger.error(f"Appeal document request returned an error: {exc}")
+        return []
+
+    try:
         data = response.json()
-    except Exception as e:
-        logger.error(f"Error fetching documents: {e}")
+    except ValueError as exc:
+        logger.error(f"Failed to decode appeal document response JSON: {exc}")
         return []
 
     all_docs = data.get("results", [])
@@ -145,18 +163,26 @@ def _convert_chunk(
         result = converter.convert(
             pdf_path, raises_on_error=False, page_range=page_range
         )
-        if result.status in (
-            ConversionStatus.SUCCESS,
-            ConversionStatus.PARTIAL_SUCCESS,
-        ):
-            if result.status == ConversionStatus.PARTIAL_SUCCESS:
-                logger.warning(f"Partial conversion for pages {page_range}")
-            return result.document.export_to_markdown()
+    except Exception as exc:
+        logger.warning(f"Conversion call failed for pages {page_range}: {exc}")
+        return ""
+
+    if result.status not in (
+        ConversionStatus.SUCCESS,
+        ConversionStatus.PARTIAL_SUCCESS,
+    ):
         logger.warning(
             f"Conversion failed for pages {page_range} (status={result.status})"
         )
-    except Exception as e:
-        logger.warning(f"Conversion error for pages {page_range}: {e}")
+        return ""
+
+    if result.status == ConversionStatus.PARTIAL_SUCCESS:
+        logger.warning(f"Partial conversion for pages {page_range}")
+
+    try:
+        return result.document.export_to_markdown()
+    except Exception as exc:
+        logger.warning(f"Markdown export failed for pages {page_range}: {exc}")
     return ""
 
 
