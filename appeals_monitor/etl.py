@@ -1,19 +1,11 @@
 """ETL functions: fetching and converting IFRC appeal documents."""
 
-from typing import List
+from typing import Any, List
 from datetime import datetime, timedelta
 import os
 import tempfile
-import pypdfium2 as pdfium
 
 import requests
-from docling.document_converter import (
-    DocumentConverter,
-    ConversionStatus,
-    InputFormat,
-    PdfFormatOption,
-)
-from docling.datamodel.pipeline_options import PdfPipelineOptions, OcrAutoOptions
 
 from appeals_monitor.config import logger
 from appeals_monitor.storage import upload_document, document_exists
@@ -34,6 +26,31 @@ _MAX_TIMEOUT = 600.0
 _CHUNK_SIZE = 30  # pages per chunk
 
 
+def _load_pdfium() -> Any:
+    import pypdfium2 as pdfium
+
+    return pdfium
+
+
+def _load_docling() -> tuple[Any, Any, Any, Any, Any, Any]:
+    from docling.document_converter import (
+        ConversionStatus,
+        DocumentConverter,
+        InputFormat,
+        PdfFormatOption,
+    )
+    from docling.datamodel.pipeline_options import OcrAutoOptions, PdfPipelineOptions
+
+    return (
+        ConversionStatus,
+        DocumentConverter,
+        InputFormat,
+        PdfFormatOption,
+        PdfPipelineOptions,
+        OcrAutoOptions,
+    )
+
+
 def _calculate_timeout(num_pages: int) -> float:
     """Calculate document timeout based on page count (30s/page on CPU)."""
     return min(max(num_pages * _TIMEOUT_PER_PAGE, _MIN_TIMEOUT), _MAX_TIMEOUT)
@@ -42,6 +59,7 @@ def _calculate_timeout(num_pages: int) -> float:
 def _get_page_count(pdf_path: str) -> int:
     """Get number of pages in a PDF without full conversion."""
     try:
+        pdfium = _load_pdfium()
         pdf = pdfium.PdfDocument(pdf_path)
         count = len(pdf)
         pdf.close()
@@ -50,8 +68,17 @@ def _get_page_count(pdf_path: str) -> int:
         return 10  # Default estimate if page count detection fails
 
 
-def _create_converter(timeout: float, with_ocr: bool = False) -> DocumentConverter:
+def _create_converter(timeout: float, with_ocr: bool = False) -> Any:
     """Create a DocumentConverter with the specified timeout."""
+    (
+        _,
+        DocumentConverter,
+        InputFormat,
+        PdfFormatOption,
+        PdfPipelineOptions,
+        OcrAutoOptions,
+    ) = _load_docling()
+
     if with_ocr:
         pipeline_options = PdfPipelineOptions(
             document_timeout=timeout,
@@ -107,11 +134,19 @@ def get_documents(last_n_days: int = 7) -> List[tuple[str, str, str]]:
     to_date = datetime.now().strftime("%Y-%m-%d")
     from_date = (datetime.now() - timedelta(days=last_n_days)).strftime("%Y-%m-%d")
 
-    url = f"{os.getenv('GO_API_URL').rstrip('/')}/appeal_document/"
+    api_url = os.getenv("GO_API_URL")
+    auth_token = os.getenv("GO_AUTH_TOKEN")
+    if not api_url or not auth_token:
+        logger.warning(
+            "GO API not configured (missing GO_API_URL/GO_AUTH_TOKEN), no documents fetched."
+        )
+        return []
+
+    url = f"{api_url.rstrip('/')}/appeal_document/"
     params = {"created_at__gte": from_date, "created_at__lte": to_date}
     headers = {
         "accept": "application/json",
-        "Authorization": f"Basic {os.getenv('GO_AUTH_TOKEN')}",
+        "Authorization": f"Basic {auth_token}",
     }
     try:
         response = requests.get(url, headers=headers, params=params, timeout=30)
@@ -156,6 +191,7 @@ def _convert_chunk(
     with_ocr: bool = False,
 ) -> str:
     """Convert a page range of a PDF to markdown. Returns empty string on failure."""
+    ConversionStatus, _, _, _, _, _ = _load_docling()
     chunk_pages = page_range[1] - page_range[0] + 1
     timeout = _calculate_timeout(chunk_pages)
     converter = _create_converter(timeout, with_ocr=with_ocr)
