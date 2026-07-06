@@ -10,7 +10,7 @@ from appeals_monitor.config import logger
 
 
 def main():
-    load_dotenv()
+    load_dotenv(override=True)
 
     command = sys.argv[1] if len(sys.argv) > 1 else "all"
 
@@ -22,14 +22,10 @@ def main():
         _run_etl()
         _run_analysis()
     else:
-        print(f"Usage: appeals-monitor [etl|analyze|all]")
-        print(
-            f"  etl      Fetch documents, convert to markdown, upload to blob storage"
-        )
-        print(
-            f"  analyze  Read from blob storage, run LLM analysis, send notifications"
-        )
-        print(f"  all      Run both steps sequentially (default)")
+        print("Usage: appeals-monitor [etl|analyze|all]")
+        print("  etl      Fetch documents, convert to markdown, upload to blob storage")
+        print("  analyze  Read from blob storage, run LLM analysis, send notifications")
+        print("  all      Run both steps sequentially (default)")
         sys.exit(1)
 
 

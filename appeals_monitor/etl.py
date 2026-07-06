@@ -125,6 +125,60 @@ def _download_document(document_url: str) -> str:
         return ""
 
 
+# IFRC GO endpoint to obtain a fresh auth token from username/password
+_GO_AUTH_TOKEN_URL = "https://goadmin.ifrc.org/get_auth_token"
+
+
+def _refresh_go_auth_token() -> str:
+    """Fetch a fresh IFRC GO auth token using GO_USERNAME/GO_PASSWORD.
+
+    Returns the token string, or an empty string on failure.
+    """
+    username = os.getenv("GO_USERNAME")
+    password = os.getenv("GO_PASSWORD")
+    if not username or not password:
+        logger.error("Cannot refresh GO auth token (missing GO_USERNAME/GO_PASSWORD).")
+        return ""
+
+    try:
+        response = requests.post(
+            _GO_AUTH_TOKEN_URL,
+            headers={"Content-Type": "application/json"},
+            json={"username": username, "password": password},
+            timeout=30,
+        )
+        response.raise_for_status()
+    except requests.RequestException as exc:
+        logger.error(f"Failed to refresh GO auth token: {exc}")
+        return ""
+
+    try:
+        token = response.json().get("token", "")
+    except ValueError as exc:
+        logger.error(f"Failed to decode GO auth token response JSON: {exc}")
+        return ""
+
+    if not token:
+        logger.error("GO auth token refresh returned no token.")
+    return token
+
+
+def _request_appeal_documents(url: str, params: dict, auth_header: str) -> Any:
+    """GET appeal documents with the given Authorization header.
+
+    Returns the response object, or None on a network-level failure.
+    """
+    headers = {
+        "accept": "application/json",
+        "Authorization": auth_header,
+    }
+    try:
+        return requests.get(url, headers=headers, params=params, timeout=30)
+    except requests.RequestException as exc:
+        logger.error(f"Failed to request appeal documents: {exc}")
+        return None
+
+
 def get_documents(last_n_days: int = 7) -> List[tuple[str, str, str]]:
     """Fetches and downloads appeal documents created in the last n days from the IFRC GO platform.
 
@@ -137,22 +191,29 @@ def get_documents(last_n_days: int = 7) -> List[tuple[str, str, str]]:
     api_url = os.getenv("GO_API_URL")
     auth_token = os.getenv("GO_AUTH_TOKEN")
     if not api_url or not auth_token:
-        logger.warning(
+        logger.error(
             "GO API not configured (missing GO_API_URL/GO_AUTH_TOKEN), no documents fetched."
         )
         return []
 
     url = f"{api_url.rstrip('/')}/appeal_document/"
     params = {"created_at__gte": from_date, "created_at__lte": to_date}
-    headers = {
-        "accept": "application/json",
-        "Authorization": f"Basic {auth_token}",
-    }
-    try:
-        response = requests.get(url, headers=headers, params=params, timeout=30)
-    except requests.RequestException as exc:
-        logger.error(f"Failed to request appeal documents: {exc}")
+
+    response = _request_appeal_documents(url, params, f"Basic {auth_token}")
+    if response is None:
         return []
+
+    # Token rejected (expired/revoked): refresh from credentials and retry once.
+    if response.status_code in (401, 403):
+        logger.warning(
+            f"GO auth token rejected ({response.status_code}), refreshing token..."
+        )
+        new_token = _refresh_go_auth_token()
+        if not new_token:
+            return []
+        response = _request_appeal_documents(url, params, f"Token {new_token}")
+        if response is None:
+            return []
 
     try:
         response.raise_for_status()
