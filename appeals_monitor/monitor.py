@@ -50,6 +50,7 @@ def run_analysis() -> List[dict]:
 
         logger.info(f"Analyzing: {doc_url}")
         doc_result = analyze_document(markdown, doc_url, agent)
+        doc_result["document_type"] = doc.get("document_type", "")
         results.append(doc_result)
 
         try:

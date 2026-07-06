@@ -1,6 +1,6 @@
 Hi {{ name if name else 'there' }},
 
-We found {{ results | length }} new Emergency Appeal document{{ "s" if results | length != 1 }} matching your interests. Here's a summary of what was published.
+We found {{ results | length }} new appeal document{{ "s" if results | length != 1 }} matching your interests. Here's a summary of what was published.
 {% for doc in results %}
 {% if results | length > 1 %}
 
@@ -9,7 +9,7 @@ We found {{ results | length }} new Emergency Appeal document{{ "s" if results |
 ### Document {{ loop.index }} of {{ results | length }}
 {% endif %}
 
-**📋 {{ doc.general_info.country or 'Unknown country' }} - {{ doc.general_info.hazard or 'Unknown hazard' }}**
+**📋 {{ doc.general_info.country or 'Unknown country' }} - {{ doc.general_info.hazard or 'Unknown hazard' }}{{ ' - ' + doc.document_type if doc.document_type else '' }}**
 
 - **People affected:** {{ "{:,}".format(doc.general_info.people_affected) if doc.general_info.people_affected else 'N/A' }}
 - **People targeted:** {{ "{:,}".format(doc.general_info.people_targeted) if doc.general_info.people_targeted else 'N/A' }}

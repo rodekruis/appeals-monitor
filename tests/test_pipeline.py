@@ -129,7 +129,42 @@ class TestFormatSummary:
         assert "Shelter" in summary
         # No CVA intervention → cash section should be hidden even if cash_info is populated
         assert "M-Pesa" not in summary
-        assert "1 new Emergency Appeal document" in summary
+        assert "1 new appeal document" in summary
+
+    def test_document_type_rendered_in_heading(self):
+        """document_type should appear in the document heading when present."""
+        results = [
+            {
+                "document_url": "http://example.com/appeal.pdf",
+                "document_type": "Emergency Appeal",
+                "general_info": {
+                    "hazard": "flood",
+                    "country": "Kenya",
+                },
+                "interventions": None,
+                "cash_info": None,
+            }
+        ]
+        summary = format_summary(results)
+        assert "Kenya" in summary
+        assert "flood" in summary
+        assert "Emergency Appeal" in summary
+
+    def test_document_type_absent_no_dash(self):
+        """When document_type is missing, no trailing ' - ' should be rendered."""
+        results = [
+            {
+                "document_url": "http://example.com/appeal.pdf",
+                "general_info": {
+                    "hazard": "flood",
+                    "country": "Kenya",
+                },
+                "interventions": None,
+                "cash_info": None,
+            }
+        ]
+        summary = format_summary(results)
+        assert "Kenya - flood**" in summary
 
     def test_cash_section_shown_only_with_cva_intervention(self):
         """Cash section should only appear when there is a CVA intervention."""
@@ -199,7 +234,7 @@ class TestFormatSummary:
             }
         ]
         summary = format_summary(results)
-        assert "1 new Emergency Appeal document" in summary
+        assert "1 new appeal document" in summary
 
 
 # --- get_recipients_from_kobo tests ---

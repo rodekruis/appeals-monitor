@@ -48,6 +48,7 @@ def _prepare_template_context(results: List[dict]) -> List[dict]:
 
         docs.append(
             {
+                "document_type": doc.get("document_type"),
                 "general_info": {**{"document_url": doc.get("document_url")}, **info},
                 "interventions": interventions,
                 "cash_info": cash,
