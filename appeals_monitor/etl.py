@@ -23,7 +23,7 @@ _MIN_TIMEOUT = 60.0
 _MAX_TIMEOUT = 600.0
 
 # Large PDFs are processed in chunks to avoid memory exhaustion (std::bad_alloc)
-_CHUNK_SIZE = 30  # pages per chunk
+_CHUNK_SIZE = 5  # pages per chunk
 
 
 def _load_pdfium() -> Any:
@@ -233,8 +233,13 @@ def get_documents(last_n_days: int = 7) -> List[tuple[str, str, str]]:
     if skipped:
         logger.info(f"Filtered out {skipped} documents with non-matching types")
 
+    with_url = [d for d in filtered if d.get("document_url")]
+    skipped_no_url = len(filtered) - len(with_url)
+    if skipped_no_url:
+        logger.info(f"Filtered out {skipped_no_url} documents with no URL")
+
     results = []
-    for doc in filtered:
+    for doc in with_url:
         doc_url = doc.get("document_url")
         doc_type = doc.get("type", "")
         if document_exists(doc_url, doc_type):
