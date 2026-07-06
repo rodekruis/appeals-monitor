@@ -59,6 +59,10 @@
                                                 "value": "__OPENAI_API_KEY__"
                                             },
                                             {
+                                                "name": "GO_API_URL",
+                                                "value": "__GO_API_URL__"
+                                            },
+                                            {
                                                 "name": "GO_AUTH_TOKEN",
                                                 "value": "__GO_AUTH_TOKEN__"
                                             },
