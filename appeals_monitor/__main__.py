@@ -21,11 +21,20 @@ def main():
     elif command == "all":
         _run_etl()
         _run_analysis()
+    elif command == "backfill":
+        _run_backfill()
     else:
-        print("Usage: appeals-monitor [etl|analyze|all]")
-        print("  etl      Fetch documents, convert to markdown, upload to blob storage")
-        print("  analyze  Read from blob storage, run LLM analysis, send notifications")
-        print("  all      Run both steps sequentially (default)")
+        print("Usage: appeals-monitor [etl|analyze|all|backfill]")
+        print(
+            "  etl       Fetch documents, convert to markdown, upload to blob storage"
+        )
+        print(
+            "  analyze   Read from blob storage, run LLM analysis, send notifications"
+        )
+        print("  all       Run both steps sequentially (default)")
+        print(
+            "  backfill  Rebuild index.json and set blob tags for all existing documents"
+        )
         sys.exit(1)
 
 
@@ -79,6 +88,18 @@ def _run_analysis():
     except Exception as exc:
         logger.error(f"Failed to print analysis results: {exc}")
         sys.exit(1)
+
+
+def _run_backfill():
+    from appeals_monitor.storage import backfill_index_and_tags
+
+    logger.info("Starting backfill of index.json and blob tags...")
+    try:
+        count = backfill_index_and_tags()
+    except Exception as exc:
+        logger.error(f"Backfill failed: {exc}")
+        sys.exit(1)
+    logger.info(f"Backfill complete. Processed {count} blobs.")
 
 
 if __name__ == "__main__":
