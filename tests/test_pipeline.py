@@ -494,15 +494,22 @@ class TestStorage:
     def test_upload_document(self, mock_container):
         from appeals_monitor.storage import upload_document
 
+        # Mock index.json read for _read_index call in _upsert_index_entry
+        mock_container.return_value.get_blob_client.return_value.exists.return_value = (
+            False
+        )
+
         name = upload_document(
             "https://go-api.ifrc.org/api/DownloadFile/12345/MDRKE001do",
             "# Doc",
             "DREF Operation",
         )
         assert name == "dref-operation/MDRKE001do.json"
-        mock_container.return_value.upload_blob.assert_called_once()
-        call_kwargs = mock_container.return_value.upload_blob.call_args
-        payload = json.loads(call_kwargs.kwargs["data"])
+        mock_container.return_value.upload_blob.assert_called()
+        # Find the call that uploaded the document (not index.json)
+        calls = mock_container.return_value.upload_blob.call_args_list
+        doc_upload_call = [c for c in calls if "dref-operation" in str(c)][0]
+        payload = json.loads(doc_upload_call.kwargs["data"])
         assert (
             payload["document_url"]
             == "https://go-api.ifrc.org/api/DownloadFile/12345/MDRKE001do"
@@ -549,10 +556,17 @@ class TestStorage:
             original
         )
 
+        # Mock index.json read for _read_index call in _upsert_index_entry
+        mock_container.return_value.get_blob_client.return_value.exists.return_value = (
+            False
+        )
+
         mark_processed("1.json", {"general_info": {"appeal_code": "MDR001"}})
 
-        call_kwargs = mock_container.return_value.upload_blob.call_args
-        updated = json.loads(call_kwargs.kwargs["data"])
+        # Find the upload_blob call for the document (first call, not the index)
+        calls = mock_container.return_value.upload_blob.call_args_list
+        doc_call = [c for c in calls if "1.json" in str(c)][0]
+        updated = json.loads(doc_call.kwargs["data"])
         assert "processed_at" in updated
         assert updated["analysis"]["general_info"]["appeal_code"] == "MDR001"
 
