@@ -164,6 +164,8 @@ def list_unprocessed() -> Generator[dict, None, None]:
 
     A document is considered unprocessed if it has no 'processed_at' timestamp.
     Each item is a dict with keys: document_url, markdown, parsed_at, blob_name.
+
+    Skips any document missing required fields (document_url, markdown, parsed_at).
     """
     container = _get_container_client()
     for blob in container.list_blobs():
@@ -172,6 +174,14 @@ def list_unprocessed() -> Generator[dict, None, None]:
         data = container.download_blob(blob.name).readall()
         doc = json.loads(data)
         if "processed_at" in doc:
+            continue
+        # Validate required fields before yielding
+        required_fields = {"document_url", "markdown", "parsed_at"}
+        if not required_fields.issubset(doc.keys()):
+            missing = required_fields - set(doc.keys())
+            logger.warning(
+                f"Skipping incomplete document {blob.name}: missing fields {missing}"
+            )
             continue
         doc["blob_name"] = blob.name
         yield doc
