@@ -14,6 +14,7 @@ from appeals_monitor.models import (
     PlannedIntervention,
     CashInfo,
     AppealExtraction,
+    country_to_iso3,
 )
 from appeals_monitor.etl import convert_document
 
@@ -36,6 +37,46 @@ class TestModels:
         )
         assert info.appeal_code == "MDRKE001"
         assert info.people_affected is None
+
+    def test_country_to_iso3_single(self):
+        assert country_to_iso3("Kenya") == "KEN"
+
+    def test_country_to_iso3_multi(self):
+        assert country_to_iso3("Kenya and Somalia") == "KEN, SOM"
+
+    def test_country_to_iso3_aliases_and_parentheticals(self):
+        # Reversed-word-order names, parentheticals, and non-country tokens ("Africa
+        # Region") that should be dropped while real countries are kept.
+        assert (
+            country_to_iso3("Democratic Republic of the Congo and Uganda") == "COD, UGA"
+        )
+        assert (
+            country_to_iso3(
+                "Democratic Republic of the Congo (DRC), Uganda, and Africa Region"
+            )
+            == "COD, UGA"
+        )
+
+    def test_country_to_iso3_fuzzy(self):
+        # Common short/alternate names still resolve.
+        assert country_to_iso3("Tanzania") == "TZA"
+
+    def test_country_to_iso3_colloquial_and_historical(self):
+        # Colloquial/short and historical names resolve via the maintained dataset.
+        assert country_to_iso3("South Korea") == "KOR"
+        assert country_to_iso3("Burma") == "MMR"
+        assert country_to_iso3("Ivory Coast") == "CIV"
+
+    def test_country_to_iso3_name_with_and_not_split(self):
+        # A single country whose name contains "and" must not be split into two.
+        assert country_to_iso3("Trinidad and Tobago") == "TTO"
+        assert country_to_iso3("Bosnia and Herzegovina") == "BIH"
+
+    def test_country_to_iso3_empty_or_unknown(self):
+        assert country_to_iso3(None) is None
+        assert country_to_iso3("") is None
+        assert country_to_iso3("   ") is None
+        assert country_to_iso3("Neverland") is None
 
     def test_planned_intervention(self):
         intv = PlannedIntervention(

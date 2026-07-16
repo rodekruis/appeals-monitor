@@ -1,10 +1,57 @@
 """Domain models for appeal document extraction."""
 
+import logging
 from enum import Enum
 from typing import List, Union
 from datetime import date, datetime
 
 from pydantic import BaseModel, Field, field_validator
+
+# --- Country ISO3 mapping ---
+
+# country_converter resolves messy real-world country names — colloquial ("South Korea"),
+# historical ("Burma"), names containing "and" ("Trinidad and Tobago"), and multi-country
+# strings — via a maintained regex database. Its matcher is verbose, so silence its logger.
+logging.getLogger("country_converter").setLevel(logging.CRITICAL)
+
+# Sentinel country_converter returns for names it cannot resolve.
+_ISO3_NOT_FOUND = "__ISO3_NOT_FOUND__"
+
+_country_converter = None
+
+
+def _get_country_converter():
+    """Lazily build and cache the CountryConverter (loads a pandas dataset once)."""
+    global _country_converter
+    if _country_converter is None:
+        import country_converter
+
+        _country_converter = country_converter.CountryConverter()
+    return _country_converter
+
+
+def country_to_iso3(country: Union[str, None]) -> Union[str, None]:
+    """Derive ISO 3166-1 alpha-3 code(s) from a free-text country name.
+
+    Handles colloquial names ("South Korea"), historical names ("Burma"), names that
+    themselves contain "and" ("Trinidad and Tobago"), and multi-country strings
+    ("Kenya and Somalia" -> "KEN, SOM"). Unresolvable tokens (e.g. "Africa Region") are
+    dropped. Returns None when nothing matches.
+    """
+    if not country or not country.strip():
+        return None
+    # enforce_list=True makes convert() return one list of codes per input name.
+    matches = _get_country_converter().convert(
+        country, to="ISO3", not_found=_ISO3_NOT_FOUND, enforce_list=True
+    )
+    codes: list[str] = []
+    for match in matches:
+        candidates = match if isinstance(match, list) else [match]
+        for code in candidates:
+            if code != _ISO3_NOT_FOUND and code not in codes:
+                codes.append(code)
+    return ", ".join(codes) if codes else None
+
 
 # --- Sector enum ---
 

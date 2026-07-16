@@ -93,6 +93,7 @@ def _index_entry_from_doc(blob_name: str, doc: dict) -> dict:
         general_info = (doc.get("analysis") or {}).get("general_info") or {}
         entry["appeal_code"] = general_info.get("appeal_code")
         entry["country"] = general_info.get("country")
+        entry["country_iso3"] = general_info.get("country_iso3")
         entry["hazard"] = general_info.get("hazard")
         entry["start_date"] = (
             str(general_info["start_date"]) if general_info.get("start_date") else None
