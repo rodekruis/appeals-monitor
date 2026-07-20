@@ -70,6 +70,7 @@ class Sector(str, Enum):
     LIVELIHOODS = "Livelihoods and Basic Needs"
     LOGISTICS = "Logistics"
     MIGRATION = "Migration"
+    NSD = "National Society Development"
     OPERATIONS_MANAGEMENT = "Operations Management"
     PMER = "Planning, Monitoring, Evaluation and Reporting (PMER)"
     PGI = "Protection, Gender, and Inclusion (PGI)"
@@ -93,6 +94,7 @@ KOBO_CHOICE_TO_SECTOR = {
     "livelihoods": Sector.LIVELIHOODS,
     "logistics": Sector.LOGISTICS,
     "migration": Sector.MIGRATION,
+    "national_society_development": Sector.NSD,
     "operations_management": Sector.OPERATIONS_MANAGEMENT,
     "pmer": Sector.PMER,
     "pgi": Sector.PGI,
