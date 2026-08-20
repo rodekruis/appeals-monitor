@@ -8,13 +8,30 @@ import tempfile
 import requests
 
 from appeals_monitor.config import logger
-from appeals_monitor.storage import upload_document, document_exists
+from appeals_monitor.storage import (
+    document_exists,
+    upload_backfilled_document,
+    upload_document,
+)
 
-# Only fetch these document types (server-side filtering not supported)
+# Only fetch these document types (server-side filtering not supported).
+# "Primary" documents: response appeals + anticipatory activations and their
+# activation reports. Excludes routine updates, final reports, and summaries.
+# Type values verified against the GO appeal_document endpoint (2026-08).
 ALLOWED_DOCUMENT_TYPES = {
+    # Response appeals
     "DREF Operation",
-    "Operational strategy",
     "Emergency Appeal",
+    "Preliminary Emergency Appeal",
+    "Appeal",
+    "Preliminary Appeal",
+    "Revised Appeal",
+    "Operational strategy",
+    # Anticipatory / EAP activations (+ their activation reports)
+    "DREF/EAP Activation",
+    "DREF/EAP Activation Report",
+    "Forecast-based Triggered Action",
+    "Forecast-based Triggered Action Report",
 }
 
 # Per-page timeout in seconds (CPU-based processing)
@@ -163,7 +180,7 @@ def _refresh_go_auth_token() -> str:
     return token
 
 
-def _request_appeal_documents(url: str, params: dict, auth_header: str) -> Any:
+def _request_appeal_documents(url: str, params: Any, auth_header: str) -> Any:
     """GET appeal documents with the given Authorization header.
 
     Returns the response object, or None on a network-level failure.
@@ -179,57 +196,69 @@ def _request_appeal_documents(url: str, params: dict, auth_header: str) -> Any:
         return None
 
 
-def get_documents(last_n_days: int = 7) -> List[tuple[str, str, str]]:
-    """Fetches and downloads appeal documents created in the last n days from the IFRC GO platform.
+def _request_with_auth(url: str, params: Any) -> Any:
+    """GET a single appeal-document page, refreshing the GO token on 401/403.
 
-    Returns a list of (document_url, local_pdf_path, document_type) tuples.
-    Documents that fail to download are skipped.
+    Returns the parsed JSON dict, or None on any failure.
     """
-    to_date = datetime.now().strftime("%Y-%m-%d")
-    from_date = (datetime.now() - timedelta(days=last_n_days)).strftime("%Y-%m-%d")
-
-    api_url = os.getenv("GO_API_URL")
     auth_token = os.getenv("GO_AUTH_TOKEN")
-    if not api_url or not auth_token:
-        logger.error(
-            "GO API not configured (missing GO_API_URL/GO_AUTH_TOKEN), no documents fetched."
-        )
-        return []
+    auth_header = f"Basic {auth_token}" if auth_token else ""
 
-    url = f"{api_url.rstrip('/')}/appeal_document/"
-    params = {"created_at__gte": from_date, "created_at__lte": to_date}
-
-    response = _request_appeal_documents(url, params, f"Basic {auth_token}")
+    response = _request_appeal_documents(url, params, auth_header)
     if response is None:
-        return []
+        return None
 
-    # Token rejected (expired/revoked): refresh from credentials and retry once.
+    # Token missing/rejected (expired/revoked): refresh from credentials and retry once.
     if response.status_code in (401, 403):
         logger.warning(
             f"GO auth token rejected ({response.status_code}), refreshing token..."
         )
         new_token = _refresh_go_auth_token()
         if not new_token:
-            return []
+            return None
         response = _request_appeal_documents(url, params, f"Token {new_token}")
         if response is None:
-            return []
+            return None
 
     try:
         response.raise_for_status()
     except requests.HTTPError as exc:
         logger.error(f"Appeal document request returned an error: {exc}")
-        return []
+        return None
 
     try:
-        data = response.json()
+        return response.json()
     except ValueError as exc:
         logger.error(f"Failed to decode appeal document response JSON: {exc}")
-        return []
+        return None
 
-    all_docs = data.get("results", [])
-    filtered = [d for d in all_docs if d.get("type") in ALLOWED_DOCUMENT_TYPES]
-    skipped = len(all_docs) - len(filtered)
+
+def _fetch_all_documents(url: str, params: dict) -> list[dict]:
+    """Fetch every appeal-document record for a query, following pagination.
+
+    The GO API returns a paginated envelope: {count, next, previous, results}.
+    `next` is a full URL that already embeds the query string, so subsequent
+    pages are fetched with params=None.
+    """
+    records: list[dict] = []
+    data = _request_with_auth(url, params)
+    while data is not None:
+        records.extend(data.get("results", []))
+        next_url = data.get("next")
+        if not next_url:
+            break
+        data = _request_with_auth(next_url, None)
+    return records
+
+
+def _download_new_documents(records: list[dict]) -> List[tuple[str, str, str]]:
+    """Filter fetched records to the allowed types and download the new ones.
+
+    Returns a list of (document_url, local_pdf_path, document_type) tuples.
+    Documents already in blob storage or without a URL are skipped.
+    """
+    filtered = [d for d in records if d.get("type") in ALLOWED_DOCUMENT_TYPES]
+    skipped = len(records) - len(filtered)
     if skipped:
         logger.info(f"Filtered out {skipped} documents with non-matching types")
 
@@ -249,6 +278,59 @@ def get_documents(last_n_days: int = 7) -> List[tuple[str, str, str]]:
         if pdf_path:
             results.append((doc_url, pdf_path, doc_type))
     return results
+
+
+def get_earliest_document_date() -> str:
+    """Return the created_at date (YYYY-MM-DD) of the earliest appeal document.
+
+    Returns an empty string if the API is not configured or the request fails.
+    """
+    api_url = os.getenv("GO_API_URL")
+    if not api_url:
+        logger.error("GO API not configured (missing GO_API_URL).")
+        return ""
+
+    url = f"{api_url.rstrip('/')}/appeal_document/"
+    data = _request_with_auth(url, {"ordering": "created_at", "limit": 1})
+    if not data:
+        return ""
+
+    results = data.get("results", [])
+    if not results:
+        return ""
+
+    created = results[0].get("created_at", "") or ""
+    return created[:10]
+
+
+def get_documents_in_range(from_date: str, to_date: str) -> List[tuple[str, str, str]]:
+    """Fetch and download appeal documents created within [from_date, to_date].
+
+    Dates are ISO strings (YYYY-MM-DD). Follows pagination across all pages.
+    Returns a list of (document_url, local_pdf_path, document_type) tuples.
+    """
+    api_url = os.getenv("GO_API_URL")
+    if not api_url:
+        logger.error(
+            "GO API not configured (missing GO_API_URL), no documents fetched."
+        )
+        return []
+
+    url = f"{api_url.rstrip('/')}/appeal_document/"
+    params = {"created_at__gte": from_date, "created_at__lte": to_date}
+    records = _fetch_all_documents(url, params)
+    return _download_new_documents(records)
+
+
+def get_documents(last_n_days: int = 7) -> List[tuple[str, str, str]]:
+    """Fetches and downloads appeal documents created in the last n days from the IFRC GO platform.
+
+    Returns a list of (document_url, local_pdf_path, document_type) tuples.
+    Documents that fail to download are skipped.
+    """
+    to_date = datetime.now().strftime("%Y-%m-%d")
+    from_date = (datetime.now() - timedelta(days=last_n_days)).strftime("%Y-%m-%d")
+    return get_documents_in_range(from_date, to_date)
 
 
 def _convert_chunk(
@@ -352,15 +434,18 @@ def convert_document(pdf_path: str) -> str:
             pass
 
 
-def run_etl(last_n_days: int = 7) -> int:
-    """ETL pipeline: fetch documents, convert to markdown, upload to blob storage.
+def _convert_and_upload(
+    docs: List[tuple[str, str, str]], *, mark_processed: bool = False
+) -> int:
+    """Convert downloaded PDFs to markdown and upload them to blob storage.
 
-    Returns the number of documents successfully processed.
+    When ``mark_processed`` is True the documents are stored and immediately
+    stamped as processed without analysis (used by the historical backfill so
+    the daily analysis/notification pipeline skips them).
+
+    Returns the number of documents successfully uploaded.
     """
-    logger.info(f"Fetching documents from the last {last_n_days} days...")
-    docs = get_documents(last_n_days=last_n_days)
-    logger.info(f"Found {len(docs)} documents")
-
+    upload = upload_backfilled_document if mark_processed else upload_document
     uploaded = 0
     for doc_url, pdf_path, doc_type in docs:
         logger.info(f"Converting: {doc_url} (type={doc_type})")
@@ -370,10 +455,35 @@ def run_etl(last_n_days: int = 7) -> int:
             continue
 
         try:
-            upload_document(doc_url, markdown, doc_type)
+            upload(doc_url, markdown, doc_type)
             uploaded += 1
         except Exception as e:
             logger.error(f"Failed to upload {doc_url} to blob storage: {e}")
 
     logger.info(f"ETL complete: {uploaded}/{len(docs)} documents uploaded.")
     return uploaded
+
+
+def run_etl(last_n_days: int = 7) -> int:
+    """ETL pipeline: fetch documents, convert to markdown, upload to blob storage.
+
+    Returns the number of documents successfully processed.
+    """
+    logger.info(f"Fetching documents from the last {last_n_days} days...")
+    docs = get_documents(last_n_days=last_n_days)
+    logger.info(f"Found {len(docs)} documents")
+    return _convert_and_upload(docs)
+
+
+def run_etl_in_range(from_date: str, to_date: str, mark_processed: bool = False) -> int:
+    """ETL pipeline for a fixed date range: fetch, convert, upload to blob storage.
+
+    Dates are ISO strings (YYYY-MM-DD). When ``mark_processed`` is True the
+    documents are stamped as processed without analysis, so the daily
+    analysis/notification pipeline will not pick them up. Returns the number of
+    documents uploaded.
+    """
+    logger.info(f"Fetching documents created between {from_date} and {to_date}...")
+    docs = get_documents_in_range(from_date, to_date)
+    logger.info(f"Found {len(docs)} documents")
+    return _convert_and_upload(docs, mark_processed=mark_processed)

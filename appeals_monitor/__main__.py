@@ -33,7 +33,7 @@ def main():
         )
         print("  all       Run both steps sequentially (default)")
         print(
-            "  backfill  Rebuild index.json and set blob tags for all existing documents"
+            "  backfill  Rebuild index.json from all existing documents"
         )
         sys.exit(1)
 
@@ -91,15 +91,15 @@ def _run_analysis():
 
 
 def _run_backfill():
-    from appeals_monitor.storage import backfill_index_and_tags
+    from appeals_monitor.storage import rebuild_index
 
-    logger.info("Starting backfill of index.json and blob tags...")
+    logger.info("Rebuilding index.json from existing documents...")
     try:
-        count = backfill_index_and_tags()
+        count = rebuild_index()
     except Exception as exc:
-        logger.error(f"Backfill failed: {exc}")
+        logger.error(f"Index rebuild failed: {exc}")
         sys.exit(1)
-    logger.info(f"Backfill complete. Processed {count} blobs.")
+    logger.info(f"Index rebuild complete. Processed {count} blobs.")
 
 
 if __name__ == "__main__":

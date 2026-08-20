@@ -7,3 +7,5 @@ docs/
 .pytest_cache/
 dist/
 build/
+*.backfill_progress.json
+*.backfill_progress.json.tmp

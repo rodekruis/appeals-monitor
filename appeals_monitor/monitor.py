@@ -9,7 +9,7 @@ from appeals_monitor.notify import notify
 from appeals_monitor.storage import list_unprocessed, mark_processed
 
 
-def _create_model():
+def create_model():
     """Create the Azure OpenAI model. Separated to keep credential validation lazy."""
     from langchain_openai import AzureChatOpenAI
 
@@ -39,7 +39,7 @@ def run_analysis() -> List[dict]:
         logger.info("No new documents to analyze.")
         return []
 
-    model = _create_model()
+    model = create_model()
     agent = create_agent_pipeline(model)
 
     results = []

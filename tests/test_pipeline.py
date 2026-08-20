@@ -559,6 +559,16 @@ class TestStorage:
         assert payload["document_type"] == "DREF Operation"
         assert "parsed_at" in payload
 
+    def test_blob_name_keeps_query_string(self):
+        """Legacy Download.aspx?FileId=N URLs differ only in the query string;
+        stripping it would collapse distinct documents onto one blob name."""
+        from appeals_monitor.storage import _blob_name
+
+        a = _blob_name("https://example.com/Download.aspx?FileId=118182")
+        b = _blob_name("https://example.com/Download.aspx?FileId=118183")
+        assert a == "Download.aspx?FileId=118182.json"
+        assert a != b
+
     @patch("appeals_monitor.storage._get_container_client")
     def test_list_unprocessed_skips_processed(self, mock_container):
         from appeals_monitor.storage import list_unprocessed
@@ -610,6 +620,44 @@ class TestStorage:
         updated = json.loads(doc_call.kwargs["data"])
         assert "processed_at" in updated
         assert updated["analysis"]["general_info"]["appeal_code"] == "MDR001"
+
+    @patch("appeals_monitor.storage._get_container_client")
+    def test_list_unanalyzed_blob_names(self, mock_container):
+        from appeals_monitor.storage import list_unanalyzed_blob_names
+
+        index = {
+            "a.json": {"has_analysis": False, "processed_at": "2026-01-02"},
+            "b.json": {"has_analysis": True, "processed_at": "2026-01-02"},
+            # No processed_at: fresh document, belongs to the daily pipeline.
+            "c.json": {"has_analysis": False},
+        }
+        mock_blob = mock_container.return_value.get_blob_client.return_value
+        mock_blob.exists.return_value = True
+        mock_blob.download_blob.return_value.readall.return_value = json.dumps(
+            index
+        ).encode()
+
+        assert list_unanalyzed_blob_names() == ["a.json"]
+        assert list_unanalyzed_blob_names(require_processed=False) == [
+            "a.json",
+            "c.json",
+        ]
+
+    @patch("appeals_monitor.storage._get_container_client")
+    def test_get_document(self, mock_container):
+        from appeals_monitor.storage import get_document
+
+        mock_blob = mock_container.return_value.get_blob_client.return_value
+        mock_blob.exists.return_value = False
+        assert get_document("missing.json") is None
+
+        mock_blob.exists.return_value = True
+        mock_blob.download_blob.return_value.readall.return_value = json.dumps(
+            {"document_url": "http://example.com", "markdown": "# doc"}
+        ).encode()
+        doc = get_document("1.json")
+        assert doc["blob_name"] == "1.json"
+        assert doc["markdown"] == "# doc"
 
 
 # --- run_etl tests ---
@@ -681,7 +729,7 @@ class TestRunAnalysis:
     @patch("appeals_monitor.monitor.mark_processed")
     @patch("appeals_monitor.monitor.analyze_document")
     @patch("appeals_monitor.monitor.create_agent_pipeline")
-    @patch("appeals_monitor.monitor._create_model")
+    @patch("appeals_monitor.monitor.create_model")
     @patch("appeals_monitor.monitor.list_unprocessed")
     def test_analyzes_and_notifies(
         self,

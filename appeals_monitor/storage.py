@@ -44,6 +44,11 @@ def _blob_name(doc_url: str, doc_type: str = "") -> str:
     Example URL: https://go-api.ifrc.org/api/DownloadFile/94906/MDRMY013do
     Blob path:   dref-operation/MDRMY013do.json
 
+    The last URL segment is used verbatim — including any query string (legacy
+    GO URLs like Download.aspx?FileId=118182 differ ONLY in the query string,
+    so stripping it would collapse distinct documents onto the same blob name).
+    '?' is legal in blob names; it only needs encoding when constructing URLs.
+
     When doc_type is empty, the blob is stored at the root level.
     """
     parts = [p for p in doc_url.rstrip("/").split("/") if p]
@@ -77,7 +82,7 @@ def _write_index(container: ContainerClient, index: dict) -> None:
 def _index_entry_from_doc(blob_name: str, doc: dict) -> dict:
     """Build an index entry from a stored blob payload."""
     source_appeal_code = blob_name.rsplit("/", 1)[-1].removesuffix(".json")
-    has_analysis = "processed_at" in doc
+    has_analysis = bool(doc.get("analysis"))
 
     entry: dict = {
         "blob_name": blob_name,
@@ -103,20 +108,6 @@ def _index_entry_from_doc(blob_name: str, doc: dict) -> dict:
         )
 
     return entry
-
-
-def _tags_from_result(result: dict) -> dict:
-    """Build Azure Blob tags dict from an analysis result. Values must be strings ≤256 chars."""
-    general_info = (result or {}).get("general_info") or {}
-    tags: dict[str, str] = {"has_analysis": "true"}
-    for field in ("appeal_code", "country", "hazard"):
-        value = general_info.get(field)
-        if value:
-            tags[field] = str(value)[:256]
-    doc_type = result.get("document_type", "")
-    if doc_type:
-        tags["doc_type"] = doc_type[:256]
-    return tags
 
 
 def _upsert_index_entry(container: ContainerClient, blob_name: str, doc: dict) -> None:
@@ -160,6 +151,41 @@ def upload_document(doc_url: str, markdown: str, doc_type: str = "") -> str:
     return name
 
 
+def upload_backfilled_document(doc_url: str, markdown: str, doc_type: str = "") -> str:
+    """Upload a parsed document and immediately mark it processed WITHOUT analysis.
+
+    Used by the historical backfill: the document is stored and stamped with a
+    ``processed_at`` timestamp so the daily analysis/notification pipeline skips
+    it (``list_unprocessed`` excludes anything with ``processed_at``), but no LLM
+    analysis is run. ``analysis`` is None and ``backfilled`` is True so these
+    documents can be identified and deliberately re-analysed later.
+
+    Returns the blob name.
+    """
+    container = _get_container_client()
+    name = _blob_name(doc_url, doc_type)
+
+    now = datetime.now(timezone.utc).isoformat()
+    payload = {
+        "document_url": doc_url,
+        "document_type": doc_type,
+        "markdown": markdown,
+        "parsed_at": now,
+        "processed_at": now,
+        "analysis": None,
+        "backfilled": True,
+    }
+
+    container.upload_blob(
+        name=name,
+        data=json.dumps(payload, ensure_ascii=False),
+        overwrite=True,
+    )
+    _upsert_index_entry(container, name, payload)
+    logger.info(f"Uploaded backfilled document (no analysis) to blob: {name}")
+    return name
+
+
 def list_unprocessed() -> Generator[dict, None, None]:
     """Yield parsed documents from blob storage that haven't been analyzed yet.
 
@@ -188,11 +214,48 @@ def list_unprocessed() -> Generator[dict, None, None]:
         yield doc
 
 
+def list_unanalyzed_blob_names(require_processed: bool = True) -> list[str]:
+    """Return blob names of documents flagged ``has_analysis: false`` in index.json.
+
+    When ``require_processed`` is True (the default), only documents that already
+    carry a ``processed_at`` timestamp are returned — i.e. documents the daily
+    pipeline will never pick up (``list_unprocessed`` skips anything with
+    ``processed_at``), so analyzing them cannot trigger an email notification.
+
+    The index is only a candidate source and may be stale in either direction;
+    callers must verify the blob content before acting on a name. Run
+    ``rebuild_index()`` first if the index may be missing entries.
+    """
+    container = _get_container_client()
+    index = _read_index(container)
+    return sorted(
+        name
+        for name, entry in index.items()
+        if not entry.get("has_analysis")
+        and (not require_processed or entry.get("processed_at"))
+    )
+
+
+def get_document(blob_name: str) -> dict | None:
+    """Download a single stored document by blob name.
+
+    Returns the document dict with an added ``blob_name`` key, or None if the
+    blob does not exist.
+    """
+    container = _get_container_client()
+    blob = container.get_blob_client(blob_name)
+    if not blob.exists():
+        return None
+    doc = json.loads(blob.download_blob().readall())
+    doc["blob_name"] = blob_name
+    return doc
+
+
 def mark_processed(blob_name: str, result: dict) -> None:
     """Store the analysis result alongside the original document.
 
     Updates the blob with an 'analysis' key and a 'processed_at' timestamp.
-    Also updates index.json and sets Azure Blob tags for discoverability.
+    Also updates index.json.
     """
     container = _get_container_client()
     data = container.download_blob(blob_name).readall()
@@ -205,15 +268,11 @@ def mark_processed(blob_name: str, result: dict) -> None:
         overwrite=True,
     )
     _upsert_index_entry(container, blob_name, doc)
-    try:
-        container.get_blob_client(blob_name).set_tags(_tags_from_result(result))
-    except Exception as exc:
-        logger.warning(f"Failed to set tags on {blob_name}: {exc}")
     logger.info(f"Marked blob as processed: {blob_name}")
 
 
-def backfill_index_and_tags() -> int:
-    """Rebuild index.json and set blob tags for all existing documents.
+def rebuild_index() -> int:
+    """Rebuild index.json from all existing documents.
 
     Idempotent — safe to re-run. Returns the number of document blobs processed.
     """
@@ -225,16 +284,8 @@ def backfill_index_and_tags() -> int:
             continue
         data = container.download_blob(blob.name).readall()
         doc = json.loads(data)
-        entry = _index_entry_from_doc(blob.name, doc)
-        index[blob.name] = entry
-        if entry["has_analysis"]:
-            try:
-                container.get_blob_client(blob.name).set_tags(
-                    _tags_from_result(doc.get("analysis") or {})
-                )
-            except Exception as exc:
-                logger.warning(f"Failed to set tags on {blob.name}: {exc}")
+        index[blob.name] = _index_entry_from_doc(blob.name, doc)
         count += 1
     _write_index(container, index)
-    logger.info(f"Backfill complete: indexed {count} blobs.")
+    logger.info(f"Index rebuild complete: indexed {count} blobs.")
     return count
