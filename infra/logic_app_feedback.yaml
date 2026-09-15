@@ -97,6 +97,9 @@
                     "path": "/subscriptions/@{encodeURIComponent('6afb807c-68ed-4a17-8665-78e5ff39bd4f')}/resourceGroups/@{encodeURIComponent('appeals-monitor')}/providers/Microsoft.ContainerInstance/containerGroups/@{encodeURIComponent('appeals-monitor-feedback-container-group')}",
                     "queries": {
                         "x-ms-api-version": "2023-05-01"
+                    },
+                    "retryPolicy": {
+                        "type": "none"
                     }
                 }
             },
@@ -188,8 +191,8 @@
                 },
                 "expression": "@not(equals(variables('ContainerState'), 'Running'))",
                 "limit": {
-                    "count": 15,
-                    "timeout": "PT15M"
+                    "count": 60,
+                    "timeout": "PT1H"
                 },
                 "type": "Until"
             },

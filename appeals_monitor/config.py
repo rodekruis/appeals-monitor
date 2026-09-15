@@ -2,6 +2,11 @@
 
 import logging
 
+
+class ConfigError(RuntimeError):
+    """Required configuration is missing or invalid; the run cannot continue."""
+
+
 logger = logging.getLogger("appeals_monitor")
 logging.basicConfig(format="%(levelname)s: %(message)s", level=logging.INFO)
 logging.getLogger("requests").setLevel(logging.WARNING)

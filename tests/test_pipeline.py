@@ -10,6 +10,7 @@ from appeals_monitor.notify import (
     get_recipients_from_kobo,
     _filter_results_by_sectors,
 )
+from appeals_monitor.config import ConfigError
 from appeals_monitor.feedback import (
     cycle_start_for,
     feedback_form_url,
@@ -966,6 +967,24 @@ class TestRunFeedback:
     @patch("appeals_monitor.feedback.feedback_form_url")
     @patch("appeals_monitor.feedback.send_markdown_email")
     @patch("appeals_monitor.feedback.get_recipients_from_kobo")
+    def test_config_error_aborts_instead_of_retrying_everyone(
+        self, mock_recipients, mock_send, mock_url
+    ):
+        mock_recipients.return_value = [
+            {"email": "a@example.com", "name": "", "sectors": set()},
+            {"email": "b@example.com", "name": "", "sectors": set()},
+        ]
+        mock_url.return_value = "https://ee.test/x/abc"
+        mock_send.side_effect = ConfigError("SENDGRID_API_KEY missing")
+
+        with pytest.raises(ConfigError):
+            run_feedback(today=ANCHOR)
+
+        assert mock_send.call_count == 1
+
+    @patch("appeals_monitor.feedback.feedback_form_url")
+    @patch("appeals_monitor.feedback.send_markdown_email")
+    @patch("appeals_monitor.feedback.get_recipients_from_kobo")
     def test_dry_run_sends_nothing(self, mock_recipients, mock_send, mock_url):
         mock_recipients.return_value = [
             {"email": "a@example.com", "name": "A", "sectors": set()}
@@ -996,12 +1015,18 @@ class TestFormatInvite:
         body = format_invite("Jane", "https://ee.test/x/abc?d[rid]=xyz", False)
         assert "Hi Jane" in body
         assert "https://ee.test/x/abc?d[rid]=xyz" in body
-        assert "not heard back" not in body
+        assert "still collecting feedback" not in body
 
     def test_reminder_wording(self):
         body = format_invite("", "https://ee.test/x/abc", True)
         assert "Hi there" in body
-        assert "not heard back" in body
+        assert "still collecting feedback" in body
+
+    def test_reminder_does_not_assume_earlier_contact(self):
+        """Mid-cycle subscribers may receive a reminder as their first contact."""
+        body = format_invite("", "https://ee.test/x/abc", True)
+        assert "not heard back" not in body
+        assert "we asked" not in body
 
 
 class TestFeedbackFormUrl:

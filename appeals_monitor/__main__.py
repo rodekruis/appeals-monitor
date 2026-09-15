@@ -108,12 +108,13 @@ def _run_backfill():
 
 
 def _run_feedback(dry_run: bool = False):
+    from appeals_monitor.config import ConfigError
     from appeals_monitor.feedback import run_feedback
 
     logger.info("Starting feedback campaign...")
     try:
         errors = run_feedback(dry_run=dry_run)
-    except RuntimeError as exc:
+    except ConfigError as exc:
         logger.error(f"Feedback campaign misconfigured: {exc}")
         sys.exit(2)
     except Exception as exc:

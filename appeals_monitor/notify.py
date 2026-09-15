@@ -10,7 +10,7 @@ from jinja2 import Environment, FileSystemLoader
 from sendgrid import SendGridAPIClient
 from sendgrid.helpers.mail import Mail
 
-from appeals_monitor.config import logger
+from appeals_monitor.config import ConfigError, logger
 from appeals_monitor.models import KOBO_CHOICE_TO_SECTOR
 
 _TEMPLATE_DIR = Path(__file__).parent / "templates"
@@ -105,7 +105,7 @@ def send_markdown_email(body: str, recipient_email: str, subject: str) -> None:
     email_from = os.getenv("EMAIL_FROM")
 
     if not api_key or not email_from:
-        raise RuntimeError(
+        raise ConfigError(
             "SendGrid not configured: missing SENDGRID_API_KEY and/or EMAIL_FROM."
         )
 
@@ -151,7 +151,7 @@ def fetch_kobo_submissions(form_uid: str) -> List[dict]:
     """
     config = kobo_api_config()
     if config is None:
-        raise RuntimeError(
+        raise ConfigError(
             "Kobo not configured: missing KOBO_API_URL and/or KOBO_API_TOKEN."
         )
     api_url, api_token = config

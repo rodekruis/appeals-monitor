@@ -1,9 +1,9 @@
 Hi {{ name if name else 'there' }},
 
 {% if is_reminder %}
-A little while ago we asked what you think of the Appeals Monitor, and we have not heard back from you yet. If you have a spare five minutes, we would still very much like your answers — they decide what we build next.
+We are still collecting feedback on the Appeals Monitor. If you can spare five minutes, we would really like to hear what you think.
 
-If you have already responded in the meantime, thank you, and please ignore this message.
+If you have already responded, thank you, and please ignore this message.
 {% else %}
 You receive an email from the Appeals Monitor whenever a new IFRC appeal document is published in one of the sectors you follow. We would like to know whether that is actually useful to you, and what we should build next.
 

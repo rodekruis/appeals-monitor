@@ -31,7 +31,7 @@ from urllib.parse import quote
 import requests
 from dateutil.relativedelta import relativedelta
 
-from appeals_monitor.config import logger
+from appeals_monitor.config import ConfigError, logger
 from appeals_monitor.notify import (
     fetch_kobo_submissions,
     get_recipients_from_kobo,
@@ -100,7 +100,7 @@ def scheduled_send_for(day: date) -> ScheduledSend | None:
 def _feedback_form_uid() -> str:
     form_uid = os.getenv("KOBO_FEEDBACK_FORM_UID")
     if not form_uid:
-        raise RuntimeError("Missing KOBO_FEEDBACK_FORM_UID environment variable.")
+        raise ConfigError("Missing KOBO_FEEDBACK_FORM_UID environment variable.")
     return form_uid
 
 
@@ -108,7 +108,7 @@ def feedback_form_url() -> str:
     """Public Enketo URL of the deployed feedback form, read from the Kobo API."""
     config = kobo_api_config()
     if config is None:
-        raise RuntimeError(
+        raise ConfigError(
             "Kobo not configured: missing KOBO_API_URL and/or KOBO_API_TOKEN."
         )
     api_url, api_token = config
@@ -129,7 +129,7 @@ def feedback_form_url() -> str:
 
     url = links.get("single_url") or links.get("url")
     if not url:
-        raise RuntimeError(f"{form_uid}: form has no public link, is it deployed?")
+        raise ConfigError(f"{form_uid}: form has no public link, is it deployed?")
     return url
 
 
@@ -219,6 +219,8 @@ def run_feedback(today: date | None = None, dry_run: bool = False) -> list[str]:
 
         try:
             send_markdown_email(body, recipient["email"], subject)
+        except ConfigError:
+            raise
         except Exception as exc:
             errors.append(f"{recipient['email']}: failed to send feedback email: {exc}")
             logger.error(f"Failed to send feedback email to {recipient['email']}: {exc}")
