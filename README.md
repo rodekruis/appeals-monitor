@@ -8,7 +8,7 @@ This pipeline has two independent stages:
 
 ### 1. ETL (`etl`)
 - Fetches recent appeal documents from the [IFRC GO platform](https://go.ifrc.org/)
-- Filters by document type (DREF Operation, Operational Strategy, Emergency Appeal)
+- Filters by document type (DREF operations, emergency appeals, operational strategies and anticipatory-action activations)
 - Converts PDFs to markdown using [Docling](https://github.com/DS4SD/docling) (CPU-only, with OCR fallback)
 - Uploads parsed documents to Azure Blob Storage (organized by document type)
 - Skips documents already in blob storage
