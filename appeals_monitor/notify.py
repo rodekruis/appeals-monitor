@@ -14,7 +14,7 @@ from appeals_monitor.config import logger
 from appeals_monitor.models import KOBO_CHOICE_TO_SECTOR
 
 _TEMPLATE_DIR = Path(__file__).parent / "templates"
-_jinja_env = Environment(
+jinja_env = Environment(
     loader=FileSystemLoader(_TEMPLATE_DIR),
     trim_blocks=True,
     lstrip_blocks=True,
@@ -65,7 +65,7 @@ def format_summary(results: List[dict], recipient_name: str = "") -> str:
     if not results:
         return "No new appeal documents were found in the monitoring period."
 
-    template = _jinja_env.get_template("email_summary.md")
+    template = jinja_env.get_template("email_summary.md")
     return template.render(
         results=_prepare_template_context(results),
         name=recipient_name,
@@ -94,13 +94,8 @@ def _filter_results_by_sectors(results: List[dict], sector_labels: set) -> List[
     return filtered
 
 
-def send_email(
-    results: List[dict],
-    recipient_email: str,
-    subject: str,
-    recipient_name: str = "",
-) -> None:
-    """Sends a human-readable email summary to a single recipient using SendGrid.
+def send_markdown_email(body: str, recipient_email: str, subject: str) -> None:
+    """Sends a Markdown body to a single recipient using SendGrid, as text + HTML.
 
     Requires the following environment variables:
         SENDGRID_API_KEY: SendGrid API key
@@ -114,15 +109,12 @@ def send_email(
             "SendGrid not configured: missing SENDGRID_API_KEY and/or EMAIL_FROM."
         )
 
-    body = format_summary(results, recipient_name=recipient_name)
-    html_body = markdown.markdown(body)
-
     message = Mail(
         from_email=(email_from, "Appeals Monitor"),
         to_emails=recipient_email,
         subject=subject,
         plain_text_content=body,
-        html_content=html_body,
+        html_content=markdown.markdown(body),
     )
 
     sg = SendGridAPIClient(api_key)
@@ -130,37 +122,43 @@ def send_email(
     logger.info(f"Email sent to {recipient_email}. Status: {response.status_code}")
 
 
-def get_recipients_from_kobo() -> List[dict]:
-    """Fetches recipients and their sector preferences from a KoboToolbox form.
+def send_email(
+    results: List[dict],
+    recipient_email: str,
+    subject: str,
+    recipient_name: str = "",
+) -> None:
+    """Sends a human-readable email summary to a single recipient using SendGrid."""
+    body = format_summary(results, recipient_name=recipient_name)
+    send_markdown_email(body, recipient_email, subject)
 
-    Reads all submissions from the configured Kobo form and extracts
-    email addresses + sector choices, keeping only the latest submission per email.
-    Only includes recipients who opted in (active == "yes").
 
-    Returns a list of dicts: [{"email": str, "sectors": set[str]}, ...]
-    where sectors is a set of full sector labels (empty = all sectors).
+def kobo_api_config() -> tuple[str, str] | None:
+    """Returns (api_url, api_token) from the environment, or None if not configured."""
+    api_url = os.getenv("KOBO_API_URL")
+    api_token = os.getenv("KOBO_API_TOKEN")
+    if not api_url or not api_token:
+        return None
+    return api_url.rstrip("/"), api_token
+
+
+def fetch_kobo_submissions(form_uid: str) -> List[dict]:
+    """Fetches every submission of a Kobo form, oldest first, following pagination.
 
     Requires the following environment variables:
         KOBO_API_URL: KoboToolbox API base URL
         KOBO_API_TOKEN: KoboToolbox API token
-        KOBO_FORM_UID: Asset UID of the form containing email subscriptions
     """
-    api_url = os.getenv("KOBO_API_URL")
-    api_token = os.getenv("KOBO_API_TOKEN")
-    form_uid = os.getenv("KOBO_FORM_UID")
-    email_field = "email"
-
-    if not api_url or not api_token or not form_uid:
-        logger.warning(
-            "Kobo not configured (missing KOBO_API_URL/KOBO_API_TOKEN/KOBO_FORM_UID), no recipients fetched."
+    config = kobo_api_config()
+    if config is None:
+        raise RuntimeError(
+            "Kobo not configured: missing KOBO_API_URL and/or KOBO_API_TOKEN."
         )
-        return []
+    api_url, api_token = config
 
     headers = {"Authorization": f"Token {api_token}"}
-    base_url = f"{api_url.rstrip('/')}/api/v2/assets/{form_uid}/data.json"
-
-    submissions = []
-    url = base_url
+    submissions: List[dict] = []
+    url = f"{api_url}/api/v2/assets/{form_uid}/data.json"
     params = {"sort": '{"_submission_time": 1}', "limit": 1000}
 
     while url:
@@ -186,6 +184,35 @@ def get_recipients_from_kobo() -> List[dict]:
         submissions.extend(data.get("results", []))
         url = data.get("next")
         params = None  # 'next' URL already includes query params
+
+    return submissions
+
+
+def get_recipients_from_kobo() -> List[dict]:
+    """Fetches recipients and their sector preferences from a KoboToolbox form.
+
+    Reads all submissions from the configured Kobo form and extracts
+    email addresses + sector choices, keeping only the latest submission per email.
+    Only includes recipients who opted in (active == "yes").
+
+    Returns a list of dicts: [{"email": str, "sectors": set[str]}, ...]
+    where sectors is a set of full sector labels (empty = all sectors).
+
+    Requires the following environment variables:
+        KOBO_API_URL: KoboToolbox API base URL
+        KOBO_API_TOKEN: KoboToolbox API token
+        KOBO_FORM_UID: Asset UID of the form containing email subscriptions
+    """
+    form_uid = os.getenv("KOBO_FORM_UID")
+    email_field = "email"
+
+    if kobo_api_config() is None or not form_uid:
+        logger.warning(
+            "Kobo not configured (missing KOBO_API_URL/KOBO_API_TOKEN/KOBO_FORM_UID), no recipients fetched."
+        )
+        return []
+
+    submissions = fetch_kobo_submissions(form_uid)
 
     latest_by_email: dict = {}
     for s in submissions:

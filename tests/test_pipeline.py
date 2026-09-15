@@ -2,12 +2,23 @@
 
 import json
 import pytest
+from datetime import date, timedelta
 from unittest.mock import patch, MagicMock
 
 from appeals_monitor.notify import (
     format_summary,
     get_recipients_from_kobo,
     _filter_results_by_sectors,
+)
+from appeals_monitor.feedback import (
+    cycle_start_for,
+    feedback_form_url,
+    format_invite,
+    personalised_url,
+    recipient_id,
+    replied_ids,
+    run_feedback,
+    scheduled_send_for,
 )
 from appeals_monitor.models import (
     ResponseInfo,
@@ -772,3 +783,253 @@ class TestRunAnalysis:
         results = run_analysis()
         assert len(results) == 0
         mock_notify.assert_not_called()
+
+
+# --- Feedback campaign tests ---
+
+ANCHOR = date(2026, 9, 16)
+
+
+class TestFeedbackSchedule:
+    def test_before_anchor_has_no_cycle(self):
+        assert cycle_start_for(ANCHOR - timedelta(days=1)) is None
+        assert scheduled_send_for(ANCHOR - timedelta(days=1)) is None
+
+    def test_anchor_day_is_the_invitation(self):
+        send = scheduled_send_for(ANCHOR)
+        assert send is not None
+        assert send.cycle_start == ANCHOR
+        assert send.round_number == 0
+        assert send.is_reminder is False
+
+    @pytest.mark.parametrize("week", [1, 2, 3, 4])
+    def test_weekly_reminders_up_to_the_cap(self, week):
+        send = scheduled_send_for(ANCHOR + timedelta(days=7 * week))
+        assert send is not None
+        assert send.round_number == week
+        assert send.is_reminder is True
+
+    def test_fifth_week_is_silent(self):
+        assert scheduled_send_for(ANCHOR + timedelta(days=35)) is None
+
+    @pytest.mark.parametrize("offset", [1, 3, 6, 8, 13, 100])
+    def test_days_between_rounds_are_silent(self, offset):
+        assert scheduled_send_for(ANCHOR + timedelta(days=offset)) is None
+
+    def test_day_before_next_cycle_still_belongs_to_the_first(self):
+        assert cycle_start_for(date(2027, 3, 15)) == ANCHOR
+        assert scheduled_send_for(date(2027, 3, 15)) is None
+
+    def test_next_cycle_starts_six_months_later(self):
+        next_start = date(2027, 3, 16)
+        assert cycle_start_for(next_start) == next_start
+        send = scheduled_send_for(next_start)
+        assert send is not None
+        assert send.cycle_start == next_start
+        assert send.round_number == 0
+
+    def test_second_cycle_reminders_are_relative_to_its_own_start(self):
+        send = scheduled_send_for(date(2027, 3, 23))
+        assert send is not None
+        assert send.cycle_start == date(2027, 3, 16)
+        assert send.round_number == 1
+
+
+class TestRecipientId:
+    def test_is_stable_and_normalised(self):
+        assert recipient_id("User@Example.com ") == recipient_id("user@example.com")
+
+    def test_differs_per_email(self):
+        assert recipient_id("a@example.com") != recipient_id("b@example.com")
+
+    def test_does_not_leak_the_address(self):
+        rid = recipient_id("user@example.com")
+        assert len(rid) == 16
+        assert "user" not in rid and "@" not in rid
+
+
+class TestPersonalisedUrl:
+    def test_appends_prefill_parameter(self):
+        url = personalised_url("https://ee.test/x/abc", "deadbeef")
+        assert url == "https://ee.test/x/abc?d[rid]=deadbeef"
+
+    def test_preserves_existing_query_string(self):
+        url = personalised_url("https://ee.test/x/abc?foo=1", "deadbeef")
+        assert url == "https://ee.test/x/abc?foo=1&d[rid]=deadbeef"
+
+
+class TestRepliedIds:
+    def _mock_form(self, monkeypatch, requests_mock, results):
+        monkeypatch.setenv("KOBO_API_URL", "https://kobo.test")
+        monkeypatch.setenv("KOBO_API_TOKEN", "test-token")
+        monkeypatch.setenv("KOBO_FEEDBACK_FORM_UID", "fb123")
+        requests_mock.get(
+            "https://kobo.test/api/v2/assets/fb123/data.json",
+            json={"results": results, "next": None},
+        )
+
+    def test_ignores_submissions_from_previous_cycles(
+        self, monkeypatch, requests_mock
+    ):
+        self._mock_form(
+            monkeypatch,
+            requests_mock,
+            [
+                {"rid": "old", "_submission_time": "2026-09-15T10:00:00"},
+                {"rid": "current", "_submission_time": "2026-09-20T10:00:00"},
+            ],
+        )
+        assert replied_ids(ANCHOR) == {"current"}
+
+    def test_ignores_submissions_without_a_code(self, monkeypatch, requests_mock):
+        self._mock_form(
+            monkeypatch,
+            requests_mock,
+            [
+                {"rid": "", "_submission_time": "2026-09-20T10:00:00"},
+                {"_submission_time": "2026-09-20T10:00:00"},
+            ],
+        )
+        assert replied_ids(ANCHOR) == set()
+
+
+class TestRunFeedback:
+    @patch("appeals_monitor.feedback.send_markdown_email")
+    @patch("appeals_monitor.feedback.get_recipients_from_kobo")
+    def test_silent_day_sends_nothing(self, mock_recipients, mock_send):
+        errors = run_feedback(today=ANCHOR + timedelta(days=3))
+        assert errors == []
+        mock_recipients.assert_not_called()
+        mock_send.assert_not_called()
+
+    @patch("appeals_monitor.feedback.feedback_form_url")
+    @patch("appeals_monitor.feedback.replied_ids")
+    @patch("appeals_monitor.feedback.send_markdown_email")
+    @patch("appeals_monitor.feedback.get_recipients_from_kobo")
+    def test_invitation_goes_to_everyone_without_checking_replies(
+        self, mock_recipients, mock_send, mock_replied, mock_url
+    ):
+        mock_recipients.return_value = [
+            {"email": "a@example.com", "name": "A", "sectors": set()},
+            {"email": "b@example.com", "name": "B", "sectors": set()},
+        ]
+        mock_url.return_value = "https://ee.test/x/abc"
+
+        errors = run_feedback(today=ANCHOR)
+
+        assert errors == []
+        assert mock_send.call_count == 2
+        mock_replied.assert_not_called()
+
+    @patch("appeals_monitor.feedback.feedback_form_url")
+    @patch("appeals_monitor.feedback.replied_ids")
+    @patch("appeals_monitor.feedback.send_markdown_email")
+    @patch("appeals_monitor.feedback.get_recipients_from_kobo")
+    def test_reminder_skips_people_who_replied(
+        self, mock_recipients, mock_send, mock_replied, mock_url
+    ):
+        mock_recipients.return_value = [
+            {"email": "replied@example.com", "name": "R", "sectors": set()},
+            {"email": "silent@example.com", "name": "S", "sectors": set()},
+        ]
+        mock_replied.return_value = {recipient_id("replied@example.com")}
+        mock_url.return_value = "https://ee.test/x/abc"
+
+        errors = run_feedback(today=ANCHOR + timedelta(days=7))
+
+        assert errors == []
+        assert mock_send.call_count == 1
+        body, email, subject = mock_send.call_args[0]
+        assert email == "silent@example.com"
+        assert "Reminder" in subject
+        assert recipient_id("silent@example.com") in body
+
+    @patch("appeals_monitor.feedback.feedback_form_url")
+    @patch("appeals_monitor.feedback.send_markdown_email")
+    @patch("appeals_monitor.feedback.get_recipients_from_kobo")
+    def test_one_failure_does_not_stop_the_others(
+        self, mock_recipients, mock_send, mock_url
+    ):
+        mock_recipients.return_value = [
+            {"email": "bad@example.com", "name": "", "sectors": set()},
+            {"email": "good@example.com", "name": "", "sectors": set()},
+        ]
+        mock_url.return_value = "https://ee.test/x/abc"
+        mock_send.side_effect = [RuntimeError("SendGrid down"), None]
+
+        errors = run_feedback(today=ANCHOR)
+
+        assert len(errors) == 1
+        assert "bad@example.com" in errors[0]
+        assert mock_send.call_count == 2
+
+    @patch("appeals_monitor.feedback.feedback_form_url")
+    @patch("appeals_monitor.feedback.send_markdown_email")
+    @patch("appeals_monitor.feedback.get_recipients_from_kobo")
+    def test_dry_run_sends_nothing(self, mock_recipients, mock_send, mock_url):
+        mock_recipients.return_value = [
+            {"email": "a@example.com", "name": "A", "sectors": set()}
+        ]
+        mock_url.return_value = "https://ee.test/x/abc"
+
+        errors = run_feedback(today=ANCHOR, dry_run=True)
+
+        assert errors == []
+        mock_send.assert_not_called()
+
+    @patch("appeals_monitor.feedback.feedback_form_url")
+    @patch("appeals_monitor.feedback.send_markdown_email")
+    @patch("appeals_monitor.feedback.get_recipients_from_kobo")
+    def test_no_subscribers_is_not_an_error(
+        self, mock_recipients, mock_send, mock_url
+    ):
+        mock_recipients.return_value = []
+
+        errors = run_feedback(today=ANCHOR)
+
+        assert errors == []
+        mock_send.assert_not_called()
+
+
+class TestFormatInvite:
+    def test_invitation_wording(self):
+        body = format_invite("Jane", "https://ee.test/x/abc?d[rid]=xyz", False)
+        assert "Hi Jane" in body
+        assert "https://ee.test/x/abc?d[rid]=xyz" in body
+        assert "not heard back" not in body
+
+    def test_reminder_wording(self):
+        body = format_invite("", "https://ee.test/x/abc", True)
+        assert "Hi there" in body
+        assert "not heard back" in body
+
+
+class TestFeedbackFormUrl:
+    def _deployed(self, monkeypatch, requests_mock, links):
+        monkeypatch.setenv("KOBO_API_URL", "https://kobo.test")
+        monkeypatch.setenv("KOBO_API_TOKEN", "test-token")
+        monkeypatch.setenv("KOBO_FEEDBACK_FORM_UID", "fb123")
+        requests_mock.get(
+            "https://kobo.test/api/v2/assets/fb123/",
+            json={"deployment__links": links},
+        )
+
+    def test_prefers_the_single_submission_link(self, monkeypatch, requests_mock):
+        self._deployed(
+            monkeypatch,
+            requests_mock,
+            {"url": "https://ee.test/x/multi", "single_url": "https://ee.test/x/one"},
+        )
+        assert feedback_form_url() == "https://ee.test/x/one"
+
+    def test_undeployed_form_raises(self, monkeypatch, requests_mock):
+        self._deployed(monkeypatch, requests_mock, {})
+        with pytest.raises(RuntimeError, match="no public link"):
+            feedback_form_url()
+
+    def test_missing_uid_raises(self, monkeypatch):
+        monkeypatch.setenv("KOBO_API_URL", "https://kobo.test")
+        monkeypatch.setenv("KOBO_API_TOKEN", "test-token")
+        monkeypatch.delenv("KOBO_FEEDBACK_FORM_UID", raising=False)
+        with pytest.raises(RuntimeError, match="KOBO_FEEDBACK_FORM_UID"):
+            feedback_form_url()

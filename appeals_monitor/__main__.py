@@ -23,8 +23,10 @@ def main():
         _run_analysis()
     elif command == "backfill":
         _run_backfill()
+    elif command == "feedback":
+        _run_feedback(dry_run="--dry-run" in sys.argv[2:])
     else:
-        print("Usage: appeals-monitor [etl|analyze|all|backfill]")
+        print("Usage: appeals-monitor [etl|analyze|all|backfill|feedback]")
         print(
             "  etl       Fetch documents, convert to markdown, upload to blob storage"
         )
@@ -34,6 +36,9 @@ def main():
         print("  all       Run both steps sequentially (default)")
         print(
             "  backfill  Rebuild index.json from all existing documents"
+        )
+        print(
+            "  feedback  Send the feedback survey invite/reminder due today [--dry-run]"
         )
         sys.exit(1)
 
@@ -100,6 +105,24 @@ def _run_backfill():
         logger.error(f"Index rebuild failed: {exc}")
         sys.exit(1)
     logger.info(f"Index rebuild complete. Processed {count} blobs.")
+
+
+def _run_feedback(dry_run: bool = False):
+    from appeals_monitor.feedback import run_feedback
+
+    logger.info("Starting feedback campaign...")
+    try:
+        errors = run_feedback(dry_run=dry_run)
+    except RuntimeError as exc:
+        logger.error(f"Feedback campaign misconfigured: {exc}")
+        sys.exit(2)
+    except Exception as exc:
+        logger.error(f"Feedback campaign execution failed: {exc}")
+        sys.exit(1)
+
+    if errors:
+        logger.error(f"Feedback campaign finished with {len(errors)} error(s).")
+        sys.exit(1)
 
 
 if __name__ == "__main__":

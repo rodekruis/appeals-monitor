@@ -22,24 +22,36 @@ This pipeline has two independent stages:
 - Sends personalized email notifications based on user preferences (submitted via Kobo)
 - Marks documents as processed so they aren't re-analyzed
 
+### 3. Feedback campaign (`feedback`)
+- Every 6 months, invites all active subscribers to fill in a Kobo feedback survey,
+  then reminds non-respondents weekly (at most 4 reminders)
+- Entirely stateless: the schedule is derived from a fixed anchor date, and "who replied"
+  is read live from the feedback form's submissions
+- Subscribers are matched by a one-way code (truncated SHA-256 of the email), prefilled
+  into a hidden `rid` field of the survey — Kobo never stores an email next to the answers
+- Run it daily; on days when nothing is due it exits immediately
+
 ## Project structure
 
 ```
 appeals_monitor/
-    __main__.py       # CLI entrypoint (etl | analyze | all)
+    __main__.py       # CLI entrypoint (etl | analyze | all | backfill | feedback)
     config.py         # Logging setup + Key Vault secret loading
     models.py         # Pydantic models, Sector enum, Kobo mappings
     etl.py            # Fetch, convert (Docling), upload documents
     analysis.py       # LLM prompt rendering + agent-based extraction
     monitor.py        # Orchestrator: analysis pipeline + notifications
     notify.py         # Email formatting (Jinja2) + SendGrid + KoboToolbox
+    feedback.py       # Half-yearly feedback campaign (schedule + reminders)
     storage.py        # Azure Blob Storage helpers
     prompts/          # Jinja2 prompt templates
     templates/        # Jinja2 email templates
 infra/
-    logic_app.yaml    # Azure Logic App workflow definition
+    logic_app.yaml           # Azure Logic App workflow definition (pipeline, every 6h)
+    logic_app_feedback.yaml  # Azure Logic App workflow definition (feedback, daily)
 kobo/
     appeals_monitor_subscription.xlsx  # Kobo subscription form
+    appeals_monitor_feedback.xlsx      # Kobo feedback survey
 tests/
     test_pipeline.py  # Pipeline tests
 ```
@@ -77,6 +89,9 @@ tests/
 
    # Analyze and send notifications only
    uv run python -m appeals_monitor analyze
+
+   # Send today's feedback invite/reminder (--dry-run to preview)
+   uv run python -m appeals_monitor feedback --dry-run
    ```
 
 ### Running tests
@@ -122,3 +137,4 @@ Required GitHub secrets: `ACR_NAME`, `ACR_PASSWORD`.
 | `KOBO_API_URL` | KoboToolbox API base URL (default: https://kobo.ifrc.org) | No |
 | `KOBO_API_TOKEN` | KoboToolbox API token | Yes |
 | `KOBO_FORM_UID` | Asset UID of the Kobo subscription form | Yes |
+| `KOBO_FEEDBACK_FORM_UID` | Asset UID of the Kobo feedback survey | Yes |
