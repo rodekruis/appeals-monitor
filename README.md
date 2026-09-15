@@ -138,3 +138,7 @@ Required GitHub secrets: `ACR_NAME`, `ACR_PASSWORD`.
 | `KOBO_API_TOKEN` | KoboToolbox API token | Yes |
 | `KOBO_FORM_UID` | Asset UID of the Kobo subscription form | Yes |
 | `KOBO_FEEDBACK_FORM_UID` | Asset UID of the Kobo feedback survey | Yes |
+
+### AI Disclaimer
+
+Parts of the code in this repository were written and reviewed with the assistance of AI tools, including large language models (LLMs). All AI-generated code has been reviewed by human contributors before being merged. The humans involved take responsibility for the correctness and quality of the code. If you have questions or concerns, please contact the maintainers.
