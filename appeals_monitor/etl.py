@@ -17,19 +17,28 @@ from appeals_monitor.storage import (
 # Only fetch these document types (server-side filtering not supported).
 # "Primary" documents: response appeals + anticipatory activations and their
 # activation reports. Excludes routine updates, final reports, and summaries.
-# Type values verified against the GO appeal_document endpoint (2026-08).
+# Type values verified against the GO appeal_document endpoint.
 ALLOWED_DOCUMENT_TYPES = {
     # Response appeals
     "DREF Operation",
+    "DREF Operation Update",
+    "DREF Operation Final Report",
     "Emergency Appeal",
+    "Emergency Appeal Revision",
     "Preliminary Emergency Appeal",
     "Appeal",
     "Preliminary Appeal",
     "Revised Appeal",
     "Operational strategy",
+    "Operations Update",
+    "6 month update",
+    "12 month update",
     # Anticipatory / EAP activations (+ their activation reports)
+    "DREF/EAP Summary",
     "DREF/EAP Activation",
+    "DREF/EAP Update",
     "DREF/EAP Activation Report",
+    "DREF/EAP Final Report",
     "Forecast-based Triggered Action",
     "Forecast-based Triggered Action Report",
 }

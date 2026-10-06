@@ -28,7 +28,29 @@ from appeals_monitor.models import (
     AppealExtraction,
     country_to_iso3,
 )
-from appeals_monitor.etl import convert_document
+from appeals_monitor.etl import _download_new_documents, convert_document
+
+
+@patch("appeals_monitor.etl._download_document", return_value="/tmp/revision.pdf")
+@patch("appeals_monitor.etl.document_exists", return_value=False)
+def test_emergency_appeal_revision_is_downloaded(mock_exists, mock_download):
+    records = [
+        {
+            "type": "Emergency Appeal Revision",
+            "document_url": "https://example.com/revision.pdf",
+        },
+        {"type": "Final Report", "document_url": "https://example.com/final.pdf"},
+    ]
+
+    assert _download_new_documents(records) == [
+        (
+            "https://example.com/revision.pdf",
+            "/tmp/revision.pdf",
+            "Emergency Appeal Revision",
+        )
+    ]
+    mock_download.assert_called_once_with("https://example.com/revision.pdf")
+
 
 # --- Pydantic model tests ---
 
