@@ -9,6 +9,7 @@ from appeals_monitor.analysis import analyze_document
 from appeals_monitor.notify import (
     format_summary,
     get_recipients_from_kobo,
+    notify,
     _filter_results_by_sectors,
     _filter_results_by_regions,
 )
@@ -523,6 +524,55 @@ class TestFilterResultsByRegions:
             {"general_info": {"region": ["Europe"]}},
         ]
         assert _filter_results_by_regions(results, {"Africa"}) == []
+
+    def test_iso3_codes_without_ifrc_regions_remain_unassigned(self):
+        codes = "OMN NRU NIU VAT PRI MAC ESH AIA BMU GIB SHN PCN ATA UMI"
+        assert regions_from_iso3(codes) == []
+
+
+class TestNotifyRegions:
+    @patch("appeals_monitor.notify.send_email")
+    @patch("appeals_monitor.notify.get_recipients_from_kobo")
+    def test_notification_requires_both_sector_and_region_match(
+        self, mock_recipients, mock_send_email
+    ):
+        mock_recipients.return_value = [
+            {
+                "email": "africa@example.com",
+                "sectors": {"Health"},
+                "regions": {"Africa"},
+            },
+            {
+                "email": "europe@example.com",
+                "sectors": {"Health"},
+                "regions": {"Europe"},
+            },
+        ]
+        results = [
+            {
+                "general_info": {"region": ["Africa"]},
+                "interventions": {"interventions": [{"sector": "Health"}]},
+            },
+            {
+                "general_info": {"region": ["Europe"]},
+                "interventions": {"interventions": [{"sector": "Health"}]},
+            },
+            {
+                "general_info": {"region": ["Africa"]},
+                "interventions": {"interventions": [{"sector": "Shelter"}]},
+            },
+        ]
+
+        notify(results)
+
+        sent_by_email = {
+            call.args[1]: call.args[0]
+            for call in mock_send_email.call_args_list
+        }
+        assert sent_by_email == {
+            "africa@example.com": [results[0]],
+            "europe@example.com": [results[1]],
+        }
 
 
 # --- convert_document tests ---
