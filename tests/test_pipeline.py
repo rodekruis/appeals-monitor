@@ -5,10 +5,12 @@ import pytest
 from datetime import date, timedelta
 from unittest.mock import patch, MagicMock
 
+from appeals_monitor.analysis import analyze_document
 from appeals_monitor.notify import (
     format_summary,
     get_recipients_from_kobo,
     _filter_results_by_sectors,
+    _filter_results_by_regions,
 )
 from appeals_monitor.config import ConfigError
 from appeals_monitor.feedback import (
@@ -27,6 +29,7 @@ from appeals_monitor.models import (
     CashInfo,
     AppealExtraction,
     country_to_iso3,
+    regions_from_iso3,
 )
 from appeals_monitor.etl import _download_new_documents, convert_document
 
@@ -111,6 +114,11 @@ class TestModels:
         assert country_to_iso3("") is None
         assert country_to_iso3("   ") is None
         assert country_to_iso3("Neverland") is None
+
+    def test_regions_from_iso3_uses_ifrc_mapping(self):
+        assert regions_from_iso3("KEN") == ["Africa"]
+        assert regions_from_iso3("KEN, SOM, JOR") == ["Africa", "MENA"]
+        assert regions_from_iso3("UNKNOWN") == []
 
     def test_planned_intervention(self):
         intv = PlannedIntervention(
@@ -312,6 +320,24 @@ class TestFormatSummary:
         assert "1 new appeal document" in summary
 
 
+# --- analysis output tests ---
+
+
+class TestAnalyzeDocument:
+    def test_region_is_derived_from_country(self):
+        extraction = MagicMock()
+        extraction.general_info.model_dump.return_value = {"country": "Kenya"}
+        extraction.interventions = []
+        extraction.cash_info.model_dump.return_value = {}
+        agent = MagicMock()
+        agent.invoke.return_value = {"structured_response": extraction}
+
+        result = analyze_document("document", "https://example.com/appeal.pdf", agent)
+
+        assert result["general_info"]["country_iso3"] == "KEN"
+        assert result["general_info"]["region"] == ["Africa"]
+
+
 # --- get_recipients_from_kobo tests ---
 
 
@@ -335,6 +361,7 @@ class TestGetRecipientsFromKobo:
                         "email": "active@example.com",
                         "active": "yes",
                         "sectors_of_interest": "health wash",
+                        "regions_of_interest": "africa mena",
                         "_submission_time": "2026-01-01",
                     },
                     {
@@ -355,6 +382,27 @@ class TestGetRecipientsFromKobo:
         active = next(r for r in result if r["email"] == "active@example.com")
         assert "Health" in active["sectors"]
         assert "Water, Sanitation and Hygiene (WASH)" in active["sectors"]
+        assert active["regions"] == {"Africa", "MENA"}
+
+    def test_all_selected_regions_are_no_filter(self, monkeypatch, requests_mock):
+        monkeypatch.setenv("KOBO_API_TOKEN", "test-token")
+        monkeypatch.setenv("KOBO_FORM_UID", "abc123")
+        monkeypatch.setenv("KOBO_API_URL", "https://kobo.test")
+        requests_mock.get(
+            "https://kobo.test/api/v2/assets/abc123/data.json",
+            json={
+                "results": [
+                    {
+                        "email": "all@example.com",
+                        "active": "yes",
+                        "regions_of_interest": "mena europe africa americas asia_pacific",
+                    }
+                ],
+                "next": None,
+            },
+        )
+
+        assert get_recipients_from_kobo()[0]["regions"] == set()
 
     def test_latest_submission_wins(self, monkeypatch, requests_mock):
         monkeypatch.setenv("KOBO_API_TOKEN", "test-token")
@@ -455,6 +503,26 @@ class TestFilterResultsBySectors:
         results = [{"interventions": None}]
         filtered = _filter_results_by_sectors(results, {"Health"})
         assert filtered == []
+
+
+class TestFilterResultsByRegions:
+    def test_empty_regions_returns_all(self):
+        results = [{"general_info": {"region": ["Africa"]}}]
+        assert _filter_results_by_regions(results, set()) == results
+
+    def test_matching_any_region_includes_multi_region_document(self):
+        results = [
+            {"general_info": {"region": ["Africa", "MENA"]}},
+            {"general_info": {"region": ["Europe"]}},
+        ]
+        assert _filter_results_by_regions(results, {"MENA"}) == results[:1]
+
+    def test_missing_or_unmatched_region_is_excluded(self):
+        results = [
+            {"general_info": {"region": []}},
+            {"general_info": {"region": ["Europe"]}},
+        ]
+        assert _filter_results_by_regions(results, {"Africa"}) == []
 
 
 # --- convert_document tests ---

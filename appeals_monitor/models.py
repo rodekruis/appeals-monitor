@@ -53,6 +53,60 @@ def country_to_iso3(country: Union[str, None]) -> Union[str, None]:
     return ", ".join(codes) if codes else None
 
 
+class Region(str, Enum):
+    MENA = "MENA"
+    EUROPE = "Europe"
+    AFRICA = "Africa"
+    AMERICAS = "Americas"
+    ASIA_PACIFIC = "Asia-Pacific"
+
+
+_COUNTRY_ISO3_CODES_BY_REGION = {
+    Region.AFRICA: """
+        AGO BDI BEN BFA BWA CAF CIV CMR COD COG COM CPV DJI ERI ETH GAB GHA GIN GMB
+        GNB GNQ KEN LBR LSO MDG MLI MOZ MRT MUS MWI NAM NER NGA RWA SDN SEN SLE SOM
+        SSD STP SWZ SYC TCD TGO TZA UGA ZAF ZMB ZWE
+    """.split(),
+    Region.AMERICAS: """
+        ABW ARG ASM ATG BHS BLZ BOL BRA BRB CAN CHL COL CRI CUB DMA DOM ECU GRD GTM
+        GUM GUY HND HTI JAM KNA LCA MEX MNP MSR NIC PAN PER PRY SLV SUR TTO URY USA
+        VCT VEN VIR
+    """.split(),
+    Region.ASIA_PACIFIC: """
+        AFG AUS BGD BRN BTN CCK CHN COK CXR FJI FSM HMD IDN IND JPN KHM KIR KOR LAO
+        LKA MDV MHL MMR MNG MYS NFK NPL NZL PAK PHL PLW PNG PRK SGP SLB THA TKL TLS
+        TON TUV VNM VUT WSM
+    """.split(),
+    Region.EUROPE: """
+        ALB AND ARM AUT AZE BEL BGR BIH BLR BVT CHE CYM CYP CZE DEU DNK ESP EST FIN
+        FLK FRA FRO GBR GEO GGY GRC GRL HRV HUN IMN IOT IRL ISL ISR ITA JEY KAZ KGZ
+        LIE LTU LUX LVA MCO MDA MKD MLT MNE NLD NOR POL PRT ROU RUS SGS SMR SRB SVK
+        SVN SWE TCA TJK TKM TUR UKR UZB VGB XKX
+    """.split(),
+    Region.MENA: """
+        ARE BHR DZA EGY IRN IRQ JOR KWT LBN LBY MAR PSE QAT SAU SYR TUN YEM
+    """.split(),
+}
+COUNTRY_ISO3_TO_REGION = {
+    iso3: region
+    for region, iso3_codes in _COUNTRY_ISO3_CODES_BY_REGION.items()
+    for iso3 in iso3_codes
+}
+
+
+def regions_from_iso3(country_iso3: Union[str, None]) -> list[str]:
+    """Return the distinct IFRC regions for comma-separated country ISO3 codes."""
+    if not country_iso3:
+        return []
+    return list(
+        dict.fromkeys(
+            COUNTRY_ISO3_TO_REGION[code.strip()].value
+            for code in country_iso3.split(",")
+            if code.strip() in COUNTRY_ISO3_TO_REGION
+        )
+    )
+
+
 # --- Sector enum ---
 
 

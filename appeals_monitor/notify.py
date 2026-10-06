@@ -11,7 +11,16 @@ from sendgrid import SendGridAPIClient
 from sendgrid.helpers.mail import Mail
 
 from appeals_monitor.config import ConfigError, logger
-from appeals_monitor.models import KOBO_CHOICE_TO_SECTOR
+from appeals_monitor.models import KOBO_CHOICE_TO_SECTOR, Region
+
+KOBO_CHOICE_TO_REGION = {
+    "mena": Region.MENA,
+    "europe": Region.EUROPE,
+    "africa": Region.AFRICA,
+    "americas": Region.AMERICAS,
+    "asia_pacific": Region.ASIA_PACIFIC,
+}
+_ALL_REGION_LABELS = {region.value for region in Region}
 
 _TEMPLATE_DIR = Path(__file__).parent / "templates"
 jinja_env = Environment(
@@ -90,6 +99,22 @@ def _filter_results_by_sectors(results: List[dict], sector_labels: set) -> List[
         ) or []
         # Include document if any intervention matches a sector of interest
         if any(intv.get("sector") in sector_labels for intv in interventions):
+            filtered.append(doc)
+    return filtered
+
+
+def _filter_results_by_regions(results: List[dict], region_labels: set) -> List[dict]:
+    """Keep documents matching any selected IFRC region; an empty set means all."""
+    if not region_labels:
+        return results
+
+    filtered = []
+    for doc in results:
+        info = doc.get("general_info") or {}
+        regions = info.get("region") or []
+        if isinstance(regions, str):
+            regions = [regions]
+        if region_labels.intersection(regions):
             filtered.append(doc)
     return filtered
 
@@ -189,14 +214,13 @@ def fetch_kobo_submissions(form_uid: str) -> List[dict]:
 
 
 def get_recipients_from_kobo() -> List[dict]:
-    """Fetches recipients and their sector preferences from a KoboToolbox form.
+    """Fetch recipients and sector/region preferences from the Kobo form.
 
     Reads all submissions from the configured Kobo form and extracts
-    email addresses + sector choices, keeping only the latest submission per email.
+    email addresses + sector and region choices, keeping only the latest submission per email.
     Only includes recipients who opted in (active == "yes").
 
-    Returns a list of dicts: [{"email": str, "sectors": set[str]}, ...]
-    where sectors is a set of full sector labels (empty = all sectors).
+    Empty sector or region sets mean all choices are included.
 
     Requires the following environment variables:
         KOBO_API_URL: KoboToolbox API base URL
@@ -231,8 +255,23 @@ def get_recipients_from_kobo() -> List[dict]:
                 sector = KOBO_CHOICE_TO_SECTOR.get(choice)
                 if sector:
                     sector_labels.add(sector.value)
+        raw_regions = (s.get("regions_of_interest") or "").strip()
+        region_labels = {
+            KOBO_CHOICE_TO_REGION[choice].value
+            for choice in raw_regions.split()
+            if choice in KOBO_CHOICE_TO_REGION
+        }
+        if region_labels == _ALL_REGION_LABELS:
+            region_labels = set()
         name = (s.get("name") or "").strip()
-        recipients.append({"email": email, "name": name, "sectors": sector_labels})
+        recipients.append(
+            {
+                "email": email,
+                "name": name,
+                "sectors": sector_labels,
+                "regions": region_labels,
+            }
+        )
 
     logger.info(
         f"Fetched {len(recipients)} active recipient(s) from Kobo form {form_uid}."
@@ -244,7 +283,7 @@ def notify(results: List[dict]) -> None:
     """Send notifications for pipeline results.
 
     Fetches recipients from KoboToolbox, filters results per recipient
-    based on their sector preferences, and sends personalized emails.
+    based on their sector and region preferences, and sends personalized emails.
 
     Raises on any failure (Kobo fetch, email send) so the pipeline can handle it.
     """
@@ -259,11 +298,15 @@ def notify(results: List[dict]) -> None:
 
     errors = []
     for recipient in recipients:
-        filtered = _filter_results_by_sectors(results, recipient["sectors"])
+        filtered = _filter_results_by_regions(
+            _filter_results_by_sectors(results, recipient["sectors"]),
+            recipient.get("regions", set()),
+        )
         if not filtered:
             logger.info(
                 f"No matching documents for {recipient['email']} "
-                f"(sectors: {recipient['sectors'] or 'all'}), skipping."
+                f"(sectors: {recipient['sectors'] or 'all'}, "
+                f"regions: {recipient.get('regions') or 'all'}), skipping."
             )
             continue
         subject = f"{len(filtered)} new appeals matching your preferences"

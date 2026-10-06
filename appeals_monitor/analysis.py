@@ -7,7 +7,12 @@ from langchain.agents import create_agent
 from langchain_openai import AzureChatOpenAI
 
 from appeals_monitor.config import logger
-from appeals_monitor.models import Sector, AppealExtraction, country_to_iso3
+from appeals_monitor.models import (
+    AppealExtraction,
+    Sector,
+    country_to_iso3,
+    regions_from_iso3,
+)
 
 # --- Prompt template ---
 
@@ -95,6 +100,7 @@ def analyze_document(
     general_info["country_iso3"] = country_to_iso3(
         general_info.get("country")
     )  # derived from the extracted country name; not part of the Pydantic model
+    general_info["region"] = regions_from_iso3(general_info["country_iso3"])
 
     try:
         interventions = {
