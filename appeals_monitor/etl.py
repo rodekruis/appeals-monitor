@@ -58,14 +58,18 @@ def _load_pdfium() -> Any:
     return pdfium
 
 
-def _load_docling() -> tuple[Any, Any, Any, Any, Any, Any]:
+def _load_docling() -> tuple[Any, Any, Any, Any, Any, Any, Any]:
     from docling.document_converter import (
         ConversionStatus,
         DocumentConverter,
         InputFormat,
         PdfFormatOption,
     )
-    from docling.datamodel.pipeline_options import OcrAutoOptions, PdfPipelineOptions
+    from docling.datamodel.pipeline_options import (
+        OcrAutoOptions,
+        OcrMode,
+        PdfPipelineOptions,
+    )
 
     return (
         ConversionStatus,
@@ -74,6 +78,7 @@ def _load_docling() -> tuple[Any, Any, Any, Any, Any, Any]:
         PdfFormatOption,
         PdfPipelineOptions,
         OcrAutoOptions,
+        OcrMode,
     )
 
 
@@ -103,13 +108,14 @@ def _create_converter(timeout: float, with_ocr: bool = False) -> Any:
         PdfFormatOption,
         PdfPipelineOptions,
         OcrAutoOptions,
+        OcrMode,
     ) = _load_docling()
 
     if with_ocr:
         pipeline_options = PdfPipelineOptions(
             document_timeout=timeout,
             do_ocr=True,
-            ocr_options=OcrAutoOptions(force_full_page_ocr=True),
+            ocr_options=OcrAutoOptions(mode=OcrMode.FULL_PAGE),
         )
     else:
         pipeline_options = PdfPipelineOptions(document_timeout=timeout)
@@ -348,7 +354,7 @@ def _convert_chunk(
     with_ocr: bool = False,
 ) -> str:
     """Convert a page range of a PDF to markdown. Returns empty string on failure."""
-    ConversionStatus, _, _, _, _, _ = _load_docling()
+    ConversionStatus, *_ = _load_docling()
     chunk_pages = page_range[1] - page_range[0] + 1
     timeout = _calculate_timeout(chunk_pages)
     converter = _create_converter(timeout, with_ocr=with_ocr)
