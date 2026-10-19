@@ -41,9 +41,9 @@ from appeals_monitor.notify import (
 )
 
 _ANCHOR_DATE = date(2026, 9, 16)
-_CYCLE_MONTHS = 6
+_CYCLE_MONTHS = 12
 _REMINDER_INTERVAL_DAYS = 7
-_MAX_REMINDERS = 4
+_MAX_REMINDERS = 2
 
 _RID_FIELD = "rid"
 _RID_LENGTH = 16
