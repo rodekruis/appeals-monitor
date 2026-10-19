@@ -15,6 +15,9 @@ from appeals_monitor.notify import (
 )
 from appeals_monitor.config import ConfigError
 from appeals_monitor.feedback import (
+    _CYCLE_MONTHS,
+    _MAX_REMINDERS,
+    _REMINDER_INTERVAL_DAYS,
     cycle_start_for,
     feedback_form_url,
     format_invite,
@@ -24,6 +27,7 @@ from appeals_monitor.feedback import (
     run_feedback,
     scheduled_send_for,
 )
+from dateutil.relativedelta import relativedelta
 from appeals_monitor.models import (
     ResponseInfo,
     PlannedIntervention,
@@ -943,26 +947,31 @@ class TestFeedbackSchedule:
         assert send.round_number == 0
         assert send.is_reminder is False
 
-    @pytest.mark.parametrize("week", [1, 2, 3, 4])
+    @pytest.mark.parametrize("week", range(1, _MAX_REMINDERS + 1))
     def test_weekly_reminders_up_to_the_cap(self, week):
-        send = scheduled_send_for(ANCHOR + timedelta(days=7 * week))
+        send = scheduled_send_for(
+            ANCHOR + timedelta(days=_REMINDER_INTERVAL_DAYS * week)
+        )
         assert send is not None
         assert send.round_number == week
         assert send.is_reminder is True
 
-    def test_fifth_week_is_silent(self):
-        assert scheduled_send_for(ANCHOR + timedelta(days=35)) is None
+    def test_week_after_reminder_cap_is_silent(self):
+        days_after_anchor = _REMINDER_INTERVAL_DAYS * (_MAX_REMINDERS + 1)
+        assert scheduled_send_for(ANCHOR + timedelta(days=days_after_anchor)) is None
 
     @pytest.mark.parametrize("offset", [1, 3, 6, 8, 13, 100])
     def test_days_between_rounds_are_silent(self, offset):
         assert scheduled_send_for(ANCHOR + timedelta(days=offset)) is None
 
     def test_day_before_next_cycle_still_belongs_to_the_first(self):
-        assert cycle_start_for(date(2027, 3, 15)) == ANCHOR
-        assert scheduled_send_for(date(2027, 3, 15)) is None
+        next_start = ANCHOR + relativedelta(months=_CYCLE_MONTHS)
+        day_before_next_start = next_start - timedelta(days=1)
+        assert cycle_start_for(day_before_next_start) == ANCHOR
+        assert scheduled_send_for(day_before_next_start) is None
 
-    def test_next_cycle_starts_six_months_later(self):
-        next_start = date(2027, 3, 16)
+    def test_next_cycle_starts_after_configured_months(self):
+        next_start = ANCHOR + relativedelta(months=_CYCLE_MONTHS)
         assert cycle_start_for(next_start) == next_start
         send = scheduled_send_for(next_start)
         assert send is not None
@@ -970,9 +979,11 @@ class TestFeedbackSchedule:
         assert send.round_number == 0
 
     def test_second_cycle_reminders_are_relative_to_its_own_start(self):
-        send = scheduled_send_for(date(2027, 3, 23))
+        next_start = ANCHOR + relativedelta(months=_CYCLE_MONTHS)
+        reminder_day = next_start + timedelta(days=_REMINDER_INTERVAL_DAYS)
+        send = scheduled_send_for(reminder_day)
         assert send is not None
-        assert send.cycle_start == date(2027, 3, 16)
+        assert send.cycle_start == next_start
         assert send.round_number == 1
 
 
