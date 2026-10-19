@@ -110,20 +110,6 @@ def publish_form(api_url: str, token: str, form_uid: str) -> None:
         json={"active": True, "version_id": version_id},
         timeout=_REQUEST_TIMEOUT_S,
     )
-    if response.status_code == requests.codes.bad_request:
-        # Some Kobo deployments reject an otherwise valid version_id after an
-        # import has created a draft. In that case the API resolves the latest
-        # imported version when only active is supplied.
-        logger.warning(
-            "Version-specific deployment was rejected for %s; retrying without version_id.",
-            form_uid,
-        )
-        response = requests.patch(
-            f"{api_url}/api/v2/assets/{form_uid}/deployment/",
-            headers=_headers(token),
-            json={"active": True},
-            timeout=_REQUEST_TIMEOUT_S,
-        )
     if not response.ok:
         detail = response.text.strip()
         suffix = f": {detail}" if detail else ""
