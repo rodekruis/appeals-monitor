@@ -1,4 +1,4 @@
-FROM python:3.14-slim
+FROM python:3.15-slim
 
 # Install system dependencies
 # libgl1:       OpenGL (needed by pypdfium2/docling)
